@@ -1,6 +1,6 @@
 # Customer Finder
 
-Kenea Customer Finder is a field operations and customer master management app built by JoshiAO. It is designed to help teams load a customer master list, review accounts by DSP or location, update customer information, capture verified GPS coordinates with supporting photos, and export edited records for submission or consolidation.
+Customer Finder is a field operations and customer master management app built by JoshiAO. It is designed to help teams load a customer master list, review accounts by DSP or location, update customer information, capture verified GPS coordinates with supporting photos, and export edited records for submission or consolidation.
 
 The app follows an offline-first workflow built around a local database. Customer records are imported from CML files, managed inside the app, tagged when edited, and then exported together with captured images as a ZIP archive for downstream processing.
 
