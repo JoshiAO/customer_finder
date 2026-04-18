@@ -222,12 +222,15 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                               ),
                             ],
                           ),
-                          onTap: () {
-                            showModalBottomSheet(
+                          onTap: () async {
+                            final didUpdate = await showModalBottomSheet<bool>(
                               context: context,
                               isScrollControlled: true,
                               builder: (context) => CustomerInfoModal(customer: customer),
                             );
+                            if (didUpdate == true && mounted) {
+                              setState(_loadCustomers);
+                            }
                           },
                         ),
                       );

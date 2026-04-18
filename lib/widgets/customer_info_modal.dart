@@ -646,31 +646,43 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
         final dialogNavigator = Navigator.of(dialogContext);
         final pageNavigator = Navigator.of(context);
         return AlertDialog(
-        title: Text('Update Status'),
-        content: DropdownButton<String>(
-          value: currentStatus,
-          items: ['Active/Approved', 'Blocked/On hold'].map((status) {
-            return DropdownMenuItem(value: status, child: Text(status));
-          }).toList(),
-          onChanged: (value) => currentStatus = value!,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => dialogNavigator.pop(),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Customer updated = widget.customer.copyWith(status: currentStatus, editedFields: _appendEditedField('status'));
-              await DatabaseService().updateCustomer(updated);
-              if (!mounted) return;
-              dialogNavigator.pop();
-              pageNavigator.pop(); // Close modal
+          title: Text('Update Status'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return DropdownButtonFormField<String>(
+                initialValue: currentStatus,
+                items: ['Active/Approved', 'Blocked/On hold'].map((status) {
+                  return DropdownMenuItem(value: status, child: Text(status));
+                }).toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() {
+                    currentStatus = value;
+                  });
+                },
+              );
             },
-            child: Text('Submit'),
           ),
-        ],
-      );
+          actions: [
+            TextButton(
+              onPressed: () => dialogNavigator.pop(),
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Customer updated = widget.customer.copyWith(
+                  status: currentStatus,
+                  editedFields: _appendEditedField('status'),
+                );
+                await DatabaseService().updateCustomer(updated);
+                if (!mounted) return;
+                dialogNavigator.pop();
+                pageNavigator.pop(true);
+              },
+              child: Text('Submit'),
+            ),
+          ],
+        );
       },
     );
   }
