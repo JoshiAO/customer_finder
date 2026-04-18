@@ -15,7 +15,7 @@ class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
   @override
-  _HomePageState createState() => _HomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
@@ -149,6 +149,17 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _importCML() async {
+    final counts = await DatabaseService().getCounts();
+    if (!mounted) return;
+    if (counts.overall > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please clear data first before importing a new CML file.'),
+        ),
+      );
+      return;
+    }
+
     final notifier = context.read<ImportNotifier>();
     final selected = await _pickCmlFile();
     if (selected == null) return;
@@ -205,6 +216,54 @@ class _HomePageState extends State<HomePage> {
           SnackBar(content: Text('Update failed: $e')),
         );
       }
+    } finally {
+      notifier.finish(opId);
+    }
+  }
+
+  Future<void> _clearData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Clear Data'),
+          content: const Text(
+            'This will remove all customer and DSP records from local storage. Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Clear'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final notifier = context.read<ImportNotifier>();
+    final opId = notifier.start(label: 'Clearing local data', type: 'clear');
+
+    try {
+      await DatabaseService().clearAllData(
+        onProgress: (p) => notifier.update(opId, p),
+      );
+      if (!mounted) return;
+      setState(() => _loadData());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Local data cleared.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Clear data failed: $e')),
+      );
     } finally {
       notifier.finish(opId);
     }
@@ -314,6 +373,7 @@ class _HomePageState extends State<HomePage> {
                   return Text('Error: ${snapshot.error}');
                 } else {
                   final counts = snapshot.data!;
+                  const actionButtonsWidth = 258.0;
                   return Container(
                     margin: const EdgeInsets.symmetric(horizontal: 18),
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
@@ -359,19 +419,47 @@ class _HomePageState extends State<HomePage> {
                           },
                         ),
                         const SizedBox(height: 20),
-                        ElevatedButton(
-                          onPressed: _importCML,
-                          child: const Text('Import CML'),
+                        SizedBox(
+                          width: actionButtonsWidth,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: ElevatedButton(
+                                  onPressed: _importCML,
+                                  child: const Text('Import CML'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 2,
+                                child: ElevatedButton(
+                                  onPressed: _clearData,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: scheme.errorContainer,
+                                    foregroundColor: scheme.onErrorContainer,
+                                  ),
+                                  child: const Icon(Icons.delete_outline),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: _updateCML,
-                          child: const Text('Update CML'),
+                        SizedBox(
+                          width: actionButtonsWidth,
+                          child: ElevatedButton(
+                            onPressed: _updateCML,
+                            child: const Text('Update CML'),
+                          ),
                         ),
                         const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: _exportEdited,
-                          child: const Text('Export Edited Customers'),
+                        SizedBox(
+                          width: actionButtonsWidth,
+                          child: ElevatedButton(
+                            onPressed: _exportEdited,
+                            child: const Text('Export Edited Customers'),
+                          ),
                         ),
                       ],
                     ),

@@ -60,10 +60,20 @@ class Customer {
     return full;
   }
 
+  static String _readString(Map<String, dynamic> json, List<String> keys) {
+    for (final key in keys) {
+      final value = json[key];
+      if (value != null && value.toString().trim().isNotEmpty) {
+        return value.toString();
+      }
+    }
+    return '';
+  }
+
   factory Customer.fromJson(Map<String, dynamic> json) {
-    final rawFirstName = (json['first_name'] ?? '').toString().trim();
-    final rawLastName = (json['last_name'] ?? '').toString().trim();
-    final legacyOwner = (json['owner'] ?? '').toString().trim();
+    final rawFirstName = _readString(json, ['first_name', 'First Name', 'FIRST_NAME']).trim();
+    final rawLastName = _readString(json, ['last_name', 'Last Name', 'LAST_NAME']).trim();
+    final legacyOwner = _readString(json, ['owner', 'Owner', 'OWNER']).trim();
 
     String resolvedFirstName = rawFirstName;
     String resolvedLastName = rawLastName;
@@ -75,32 +85,37 @@ class Customer {
     }
 
     return Customer(
-      branchName: json['branch_name'] ?? '',
-      cdam: json['cdam'] ?? '',
-      fs: json['fs'] ?? '',
-      channel: json['channel'] ?? '',
-      salesRepId: json['sales_rep_id'] ?? '',
-      salesRepName: json['sales_rep_name'] ?? '',
-      customerCode: json['customer_code'] ?? '',
-      customerName: json['customer_name'] ?? '',
-      barangay: json['barangay'] ?? '',
-      city: json['city'] ?? '',
-      province: json['province'] ?? '',
-      status: json['status'] ?? '',
-      retailEnvironment: json['retail_environment'] ?? '',
-      partyClassificationDescription: json['party_classification_description'] ?? '',
-      coverageDay: json['coverage_day'] ?? '',
-      wklyCoverage: json['wkly_coverage'] ?? '',
-      freqCount: int.tryParse((json['freq_count'] ?? '').toString()) ?? 0,
-      freq: json['freq'] ?? '',
+      branchName: _readString(json, ['branch_name', 'branch name', 'Branch Name']),
+      cdam: _readString(json, ['cdam', 'CDAM']),
+      fs: _readString(json, ['fs', 'FS']),
+      channel: _readString(json, ['channel', 'Channel']),
+      salesRepId: _readString(json, ['sales_rep_id', 'sales rep id', 'Sales Rep ID']),
+      salesRepName: _readString(json, ['sales_rep_name', 'sales rep name', 'Sales Rep Name']),
+      customerCode: _readString(json, ['customer_code', 'customer code', 'Customer Code']),
+      customerName: _readString(json, ['customer_name', 'customer name', 'Customer Name']),
+      barangay: _readString(json, ['barangay', 'Barangay', 'BRGY', 'brgy']),
+      city: _readString(json, ['city', 'City', 'CITY', 'municipality', 'Municipality']),
+      province: _readString(json, ['province', 'Province', 'PROVINCE', 'prov', 'Prov']),
+      status: _readString(json, ['status', 'Status']),
+      retailEnvironment: _readString(json, ['retail_environment', 'retail environment', 'Retail Environment']),
+      partyClassificationDescription: _readString(
+        json,
+        ['party_classification_description', 'party classification description', 'Party Classification Description'],
+      ),
+      coverageDay: _readString(json, ['coverage_day', 'coverage day', 'Coverage Day']),
+      wklyCoverage: _readString(json, ['wkly_coverage', 'wkly coverage', 'Wkly Coverage']),
+      freqCount: int.tryParse(_readString(json, ['freq_count', 'freq count', 'Freq Count'])) ?? 0,
+      freq: _readString(json, ['freq', 'Freq']),
       latitude: json['latitude'] != null ? double.tryParse(json['latitude'].toString()) : null,
       longitude: json['longitude'] != null ? double.tryParse(json['longitude'].toString()) : null,
-      phone: json['phone'] ?? '',
+      phone: _readString(json, ['phone', 'Phone']),
       firstName: resolvedFirstName,
       lastName: resolvedLastName,
-      address: json['address'] ?? '',
-      tinNo: (json['tin_no'] ?? json['tin no'] ?? '').toString(),
-      editedFields: json['edited_fields'],
+      address: _readString(json, ['address', 'Address']),
+      tinNo: _readString(json, ['tin_no', 'tin no', 'TIN No']),
+      editedFields: _readString(json, ['edited_fields', 'edited fields']).isEmpty
+          ? null
+          : _readString(json, ['edited_fields', 'edited fields']),
     );
   }
 

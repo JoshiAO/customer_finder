@@ -8,7 +8,7 @@ class CustomerUpdateForm extends StatefulWidget {
   const CustomerUpdateForm({super.key, required this.customer});
 
   @override
-  _CustomerUpdateFormState createState() => _CustomerUpdateFormState();
+  State<CustomerUpdateForm> createState() => _CustomerUpdateFormState();
 }
 
 class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
@@ -46,6 +46,11 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
   };
 
   late Customer _originalCustomer;
+
+  String? _valueIfPresent(List<String> options, String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    return options.contains(value) ? value : null;
+  }
 
   @override
   void initState() {
@@ -165,6 +170,7 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
       editedFields: editedFields.isEmpty ? null : editedFields.join(', '),
     );
     await DatabaseService().updateCustomer(updatedCustomer);
+    if (!mounted) return;
     Navigator.pop(context);
   }
 
@@ -179,13 +185,13 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
         child: ListView(
           children: [
             DropdownButtonFormField<String>(
-              initialValue: _selectedCoverageDay,
+              initialValue: _valueIfPresent(_coverageDayMap.values.toList(), _selectedCoverageDay),
               decoration: InputDecoration(labelText: 'Coverage Day'),
               items: _coverageDayMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
               onChanged: (value) => setState(() => _selectedCoverageDay = value),
             ),
             DropdownButtonFormField<String>(
-              initialValue: _selectedWklyCoverage,
+              initialValue: _valueIfPresent(_wklyCoverageMap.values.toList(), _selectedWklyCoverage),
               decoration: InputDecoration(labelText: 'Wkly Coverage'),
               items: _wklyCoverageMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
               onChanged: (value) => setState(() => _selectedWklyCoverage = value),
@@ -195,7 +201,7 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
             TextField(controller: _lastNameController, decoration: InputDecoration(labelText: 'Last Name')),
             TextField(controller: _tinNoController, decoration: InputDecoration(labelText: 'TIN No')),
             DropdownButtonFormField<String>(
-              initialValue: _selectedProvince,
+              initialValue: _valueIfPresent(_provinces, _selectedProvince),
               decoration: InputDecoration(labelText: 'Province'),
               items: _provinces.map((prov) => DropdownMenuItem(value: prov, child: Text(prov))).toList(),
               onChanged: (value) => setState(() {
@@ -204,7 +210,7 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
               }),
             ),
             DropdownButtonFormField<String>(
-              initialValue: _selectedCity,
+              initialValue: _valueIfPresent(_cities, _selectedCity),
               decoration: InputDecoration(labelText: 'City'),
               items: _cities.map((city) => DropdownMenuItem(value: city, child: Text(city))).toList(),
               onChanged: (value) => setState(() {
@@ -213,7 +219,7 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
               }),
             ),
             DropdownButtonFormField<String>(
-              initialValue: _selectedBarangay,
+              initialValue: _valueIfPresent(_barangays, _selectedBarangay),
               decoration: InputDecoration(labelText: 'Barangay'),
               items: _barangays.map((brgy) => DropdownMenuItem(value: brgy, child: Text(brgy))).toList(),
               onChanged: (value) => setState(() => _selectedBarangay = value),

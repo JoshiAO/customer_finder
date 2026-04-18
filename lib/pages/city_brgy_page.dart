@@ -7,7 +7,7 @@ class CityBrgyPage extends StatefulWidget {
   const CityBrgyPage({super.key});
 
   @override
-  _CityBrgyPageState createState() => _CityBrgyPageState();
+  State<CityBrgyPage> createState() => _CityBrgyPageState();
 }
 
 class _CityBrgyPageState extends State<CityBrgyPage> {
@@ -25,6 +25,19 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
   List<String> _barangays = [];
   List<Map<String, dynamic>> _allAreas = [];
 
+  String _normalizeLocationValue(String? value) {
+    return (value ?? '')
+      .replaceAll(RegExp("^['\"]+"), '')
+      .replaceAll(RegExp("['\"]+\$"), '')
+        .trim()
+        .toUpperCase()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _canonicalLocationValue(String? value) {
+    return _normalizeLocationValue(value).replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -39,15 +52,32 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
   }
 
   Future<void> _loadAreas() async {
-    final areas = await DatabaseService().loadAreas();
+    final areas = await DatabaseService().loadCustomerAreas();
     _allAreas = areas;
-    _provinces = areas.map<String>((a) => a['province'] as String).toSet().where((s) => s.isNotEmpty).toList()..sort();
-    setState(() {});
+    _provinces = areas
+        .map<String>((a) => (a['province'] as String? ?? '').trim())
+        .toSet()
+        .where((s) => s.isNotEmpty)
+        .toList()
+      ..sort();
+
+    if (mounted) {
+      setState(() {
+        _loadCustomers();
+      });
+    }
   }
 
   void _updateCities() {
     if (_selectedProvince != null) {
-      _cities = _allAreas.where((a) => a['province'] == _selectedProvince).map<String>((a) => a['city'] as String).toSet().where((s) => s.isNotEmpty).toList()..sort();
+      final selectedProvince = _canonicalLocationValue(_selectedProvince);
+      _cities = _allAreas
+          .where((a) => _canonicalLocationValue(a['province'] as String?) == selectedProvince)
+          .map<String>((a) => (a['city'] as String? ?? '').trim())
+          .toSet()
+          .where((s) => s.isNotEmpty)
+          .toList()
+        ..sort();
       if (!_cities.contains(_selectedCity)) _selectedCity = null;
     } else {
       _cities = [];
@@ -58,8 +88,18 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
   }
 
   void _updateBarangays() {
-    if (_selectedCity != null) {
-      _barangays = _allAreas.where((a) => a['city'] == _selectedCity).map<String>((a) => a['barangay'] as String).toSet().where((s) => s.isNotEmpty).toList()..sort();
+    if (_selectedProvince != null && _selectedCity != null) {
+      final selectedProvince = _canonicalLocationValue(_selectedProvince);
+      final selectedCity = _canonicalLocationValue(_selectedCity);
+      _barangays = _allAreas
+          .where((a) =>
+          _canonicalLocationValue(a['province'] as String?) == selectedProvince &&
+          _canonicalLocationValue(a['city'] as String?) == selectedCity)
+          .map<String>((a) => (a['barangay'] as String? ?? '').trim())
+          .toSet()
+          .where((s) => s.isNotEmpty)
+          .toList()
+        ..sort();
       if (!_barangays.contains(_selectedBarangay)) _selectedBarangay = null;
     } else {
       _barangays = [];
@@ -69,7 +109,7 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
   }
 
   void _loadCustomers() {
-    _customersFuture = DatabaseService().getCustomersFiltered(
+    _customersFuture = DatabaseService().getCustomersForCityBrgyCards(
       province: _selectedProvince,
       city: _selectedCity,
       barangay: _selectedBarangay,
@@ -106,6 +146,7 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
     required void Function(String?) onChanged,
     bool enabled = true,
   }) {
+    final safeValue = (value != null && items.contains(value)) ? value : null;
     return DropdownButtonFormField<String>(
       isExpanded: true,
       decoration: InputDecoration(
@@ -114,7 +155,7 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
         isDense: true,
       ),
       hint: Text(hint, overflow: TextOverflow.ellipsis),
-      initialValue: value,
+      initialValue: safeValue,
       items: [
         DropdownMenuItem<String>(value: null, child: Text('All', style: TextStyle(color: Colors.grey[600]))),
         ...items.map((item) => DropdownMenuItem<String>(value: item, child: Text(item, overflow: TextOverflow.ellipsis))),
@@ -275,6 +316,9 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
                     itemCount: customers.length,
                     itemBuilder: (context, index) {
                       final customer = customers[index];
+                      final provinceText = customer.province.trim().isEmpty ? 'N/A' : customer.province.trim();
+                      final cityText = customer.city.trim().isEmpty ? 'N/A' : customer.city.trim();
+                      final barangayText = customer.barangay.trim().isEmpty ? 'N/A' : customer.barangay.trim();
                       final isActive = customer.status == 'Active/Approved';
                       final statusColor = isActive ? Colors.green : Colors.red;
                       final hasLocation = _hasValidLocation(customer);
@@ -283,7 +327,13 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
                         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: ListTile(
                           title: Text(customer.customerName),
-                          subtitle: Text('${customer.customerCode} • ${customer.fullName}\n${customer.city} • ${customer.barangay}'),
+                          subtitle: Text(
+                            '${customer.customerCode} • ${customer.fullName}\n'
+                            'Province: $provinceText\n'
+                            'City: $cityText\n'
+                            'Barangay: $barangayText',
+                          ),
+                          isThreeLine: true,
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             crossAxisAlignment: CrossAxisAlignment.end,

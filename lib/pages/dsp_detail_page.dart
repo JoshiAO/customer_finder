@@ -10,7 +10,7 @@ class DSPDetailPage extends StatefulWidget {
   const DSPDetailPage({super.key, required this.dsp});
 
   @override
-  _DSPDetailPageState createState() => _DSPDetailPageState();
+  State<DSPDetailPage> createState() => _DSPDetailPageState();
 }
 
 class _DSPDetailPageState extends State<DSPDetailPage> {
@@ -101,9 +101,11 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                   child: DropdownButton<String>(
                     hint: Text('Status'),
                     value: _selectedStatus,
-                    items: ['Active/Approved', 'Blocked/On hold'].map((status) {
-                      return DropdownMenuItem(value: status, child: Text(status));
-                    }).toList(),
+                    items: const [
+                      DropdownMenuItem<String>(value: null, child: Text('All')),
+                      DropdownMenuItem<String>(value: 'Active/Approved', child: Text('Active/Approved')),
+                      DropdownMenuItem<String>(value: 'Blocked/On hold', child: Text('Blocked/On hold')),
+                    ],
                     onChanged: (value) {
                       setState(() {
                         _selectedStatus = value;
@@ -117,7 +119,11 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                   child: DropdownButton<String>(
                     hint: Text('Coverage Day'),
                     value: _selectedCoverageDay,
-                    items: _coverageDayMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
+                    items: [
+                      const DropdownMenuItem<String>(value: null, child: Text('All')),
+                      ..._coverageDayMap.entries
+                          .map((e) => DropdownMenuItem<String>(value: e.value, child: Text(e.key))),
+                    ],
                     onChanged: (value) {
                       setState(() {
                         _selectedCoverageDay = value;
@@ -131,7 +137,11 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                   child: DropdownButton<String>(
                     hint: Text('Wkly Coverage'),
                     value: _selectedWklyCoverage,
-                    items: _wklyCoverageMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
+                    items: [
+                      const DropdownMenuItem<String>(value: null, child: Text('All')),
+                      ..._wklyCoverageMap.entries
+                          .map((e) => DropdownMenuItem<String>(value: e.value, child: Text(e.key))),
+                    ],
                     onChanged: (value) {
                       setState(() {
                         _selectedWklyCoverage = value;

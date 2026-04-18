@@ -1,30 +1,36 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:kenea_customers/main.dart';
+import 'package:kenea_customers/pages/launch_screen.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('App launches and shows branded launch screen', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('KENEA.RDSI Project'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+  testWidgets('Launch screen triggers onDone callback after delay', (WidgetTester tester) async {
+    var didCallOnDone = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LaunchScreen(
+          onDone: () {
+            didCallOnDone = true;
+          },
+        ),
+      ),
+    );
+
+    expect(didCallOnDone, isFalse);
+    expect(find.text('KENEA.RDSI Project'), findsOneWidget);
+
+    // LaunchScreen uses a 2800ms timer before calling onDone.
+    await tester.pump(const Duration(milliseconds: 2900));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(didCallOnDone, isTrue);
   });
 }
