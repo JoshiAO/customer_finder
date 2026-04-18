@@ -157,7 +157,7 @@ class _CityBrgyPageState extends State<CityBrgyPage> {
       hint: Text(hint, overflow: TextOverflow.ellipsis),
       initialValue: safeValue,
       items: [
-        DropdownMenuItem<String>(value: null, child: Text('All', style: TextStyle(color: Colors.grey[600]))),
+        DropdownMenuItem<String>(value: null, child: Text(hint, style: TextStyle(color: Colors.grey[600]))),
         ...items.map((item) => DropdownMenuItem<String>(value: item, child: Text(item, overflow: TextOverflow.ellipsis))),
       ],
       onChanged: enabled ? onChanged : null,

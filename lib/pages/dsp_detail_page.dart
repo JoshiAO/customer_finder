@@ -102,7 +102,7 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                     hint: Text('Status'),
                     value: _selectedStatus,
                     items: const [
-                      DropdownMenuItem<String>(value: null, child: Text('All')),
+                      DropdownMenuItem<String>(value: null, child: Text('Status')),
                       DropdownMenuItem<String>(value: 'Active/Approved', child: Text('Active/Approved')),
                       DropdownMenuItem<String>(value: 'Blocked/On hold', child: Text('Blocked/On hold')),
                     ],
@@ -120,7 +120,7 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                     hint: Text('Coverage Day'),
                     value: _selectedCoverageDay,
                     items: [
-                      const DropdownMenuItem<String>(value: null, child: Text('All')),
+                      const DropdownMenuItem<String>(value: null, child: Text('Coverage Day')),
                       ..._coverageDayMap.entries
                           .map((e) => DropdownMenuItem<String>(value: e.value, child: Text(e.key))),
                     ],
@@ -138,7 +138,7 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                     hint: Text('Wkly Coverage'),
                     value: _selectedWklyCoverage,
                     items: [
-                      const DropdownMenuItem<String>(value: null, child: Text('All')),
+                      const DropdownMenuItem<String>(value: null, child: Text('Wkly Coverage')),
                       ..._wklyCoverageMap.entries
                           .map((e) => DropdownMenuItem<String>(value: e.value, child: Text(e.key))),
                     ],
