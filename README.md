@@ -1,4 +1,4 @@
-# Kenea Customer Finder
+# Customer Finder
 
 Kenea Customer Finder is a field operations and customer master management app built by JoshiAO. It is designed to help teams load a customer master list, review accounts by DSP or location, update customer information, capture verified GPS coordinates with supporting photos, and export edited records for submission or consolidation.
 
