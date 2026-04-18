@@ -1,0 +1,235 @@
+import 'package:flutter/material.dart';
+import '../models/customer.dart';
+import '../services/database_service.dart';
+
+class CustomerUpdateForm extends StatefulWidget {
+  final Customer customer;
+
+  const CustomerUpdateForm({super.key, required this.customer});
+
+  @override
+  _CustomerUpdateFormState createState() => _CustomerUpdateFormState();
+}
+
+class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
+  late TextEditingController _nameController;
+  late TextEditingController _phoneController;
+  late TextEditingController _firstNameController;
+  late TextEditingController _lastNameController;
+  late TextEditingController _tinNoController;
+  late TextEditingController _addressController;
+
+  String? _selectedCoverageDay;
+  String? _selectedWklyCoverage;
+  String? _selectedProvince;
+  String? _selectedCity;
+  String? _selectedBarangay;
+
+  List<Map<String, dynamic>> _areas = [];
+  List<String> _provinces = [];
+  List<String> _cities = [];
+  List<String> _barangays = [];
+
+  final Map<String, String> _coverageDayMap = {
+    'Monday': 'MON',
+    'Tuesday': 'TUE',
+    'Wednesday': 'WED',
+    'Thursday': 'THU',
+    'Friday': 'FRI',
+    'Saturday': 'SAT',
+  };
+
+  final Map<String, String> _wklyCoverageMap = {
+    'Weekly': 'WKLY',
+    'Week 1 and 3': 'W1&W3',
+    'Week 2 and 4': 'W2&W4',
+  };
+
+  late Customer _originalCustomer;
+
+  @override
+  void initState() {
+    super.initState();
+    _originalCustomer = widget.customer;
+    _nameController = TextEditingController(text: widget.customer.customerName);
+    _selectedCoverageDay = _coverageDayMap[widget.customer.coverageDay] ?? widget.customer.coverageDay;
+    _selectedWklyCoverage = _wklyCoverageMap[widget.customer.wklyCoverage] ?? widget.customer.wklyCoverage;
+    _phoneController = TextEditingController(text: widget.customer.phone);
+    _firstNameController = TextEditingController(text: widget.customer.firstName);
+    _lastNameController = TextEditingController(text: widget.customer.lastName);
+    _tinNoController = TextEditingController(text: widget.customer.tinNo);
+    _selectedProvince = widget.customer.province;
+    _selectedCity = widget.customer.city;
+    _selectedBarangay = widget.customer.barangay;
+    _addressController = TextEditingController(text: widget.customer.address);
+    _loadAreas();
+  }
+
+  Future<void> _loadAreas() async {
+    _areas = await DatabaseService().loadAreas();
+    _provinces = _areas.map((a) => a['province'] as String).toSet().toList()..sort();
+    setState(() {});
+    _updateCities();
+  }
+
+  void _updateCities() {
+    if (_selectedProvince != null) {
+      _cities = _areas.where((a) => a['province'] == _selectedProvince).map((a) => a['city'] as String).toSet().toList()..sort();
+    } else {
+      _cities = [];
+    }
+    if (!_cities.contains(_selectedCity)) {
+      _selectedCity = null;
+    }
+    _updateBarangays();
+  }
+
+  void _updateBarangays() {
+    if (_selectedCity != null) {
+      _barangays = _areas.where((a) => a['city'] == _selectedCity).map((a) => a['barangay'] as String).toSet().toList()..sort();
+    } else {
+      _barangays = [];
+    }
+    if (!_barangays.contains(_selectedBarangay)) {
+      _selectedBarangay = null;
+    }
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _tinNoController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _reset() {
+    _nameController.text = widget.customer.customerName;
+    _selectedCoverageDay = _coverageDayMap[widget.customer.coverageDay] ?? widget.customer.coverageDay;
+    _selectedWklyCoverage = _wklyCoverageMap[widget.customer.wklyCoverage] ?? widget.customer.wklyCoverage;
+    _phoneController.text = widget.customer.phone;
+    _firstNameController.text = widget.customer.firstName;
+    _lastNameController.text = widget.customer.lastName;
+    _tinNoController.text = widget.customer.tinNo;
+    _selectedProvince = widget.customer.province;
+    _selectedCity = widget.customer.city;
+    _selectedBarangay = widget.customer.barangay;
+    _addressController.text = widget.customer.address;
+    _updateCities();
+  }
+
+  void _submit() async {
+    List<String> editedFields = [];
+    if (_nameController.text != _originalCustomer.customerName) editedFields.add('customer_name');
+    if (_selectedCoverageDay != (_coverageDayMap[_originalCustomer.coverageDay] ?? _originalCustomer.coverageDay)) editedFields.add('coverage_day');
+    if (_selectedWklyCoverage != (_wklyCoverageMap[_originalCustomer.wklyCoverage] ?? _originalCustomer.wklyCoverage)) editedFields.add('wkly_coverage');
+    if (_phoneController.text != _originalCustomer.phone) editedFields.add('phone');
+    if (_firstNameController.text != _originalCustomer.firstName) editedFields.add('first_name');
+    if (_lastNameController.text != _originalCustomer.lastName) editedFields.add('last_name');
+    if (_tinNoController.text != _originalCustomer.tinNo) editedFields.add('tin_no');
+    if (_selectedProvince != _originalCustomer.province) editedFields.add('province');
+    if (_selectedCity != _originalCustomer.city) editedFields.add('city');
+    if (_selectedBarangay != _originalCustomer.barangay) editedFields.add('barangay');
+    if (_addressController.text != _originalCustomer.address) editedFields.add('address');
+
+    Customer updatedCustomer = Customer(
+      branchName: _originalCustomer.branchName,
+      cdam: _originalCustomer.cdam,
+      fs: _originalCustomer.fs,
+      channel: _originalCustomer.channel,
+      salesRepId: _originalCustomer.salesRepId,
+      salesRepName: _originalCustomer.salesRepName,
+      customerCode: _originalCustomer.customerCode,
+      customerName: _nameController.text,
+      barangay: _selectedBarangay ?? '',
+      city: _selectedCity ?? '',
+      province: _selectedProvince ?? '',
+      status: _originalCustomer.status,
+      retailEnvironment: _originalCustomer.retailEnvironment,
+      partyClassificationDescription: _originalCustomer.partyClassificationDescription,
+      coverageDay: _selectedCoverageDay ?? '',
+      wklyCoverage: _selectedWklyCoverage ?? '',
+      freqCount: _originalCustomer.freqCount,
+      freq: _originalCustomer.freq,
+      latitude: _originalCustomer.latitude,
+      longitude: _originalCustomer.longitude,
+      phone: _phoneController.text,
+      firstName: _firstNameController.text,
+      lastName: _lastNameController.text,
+      address: _addressController.text,
+      tinNo: _tinNoController.text,
+      editedFields: editedFields.isEmpty ? null : editedFields.join(', '),
+    );
+    await DatabaseService().updateCustomer(updatedCustomer);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Update Customer Info'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: ListView(
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _selectedCoverageDay,
+              decoration: InputDecoration(labelText: 'Coverage Day'),
+              items: _coverageDayMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
+              onChanged: (value) => setState(() => _selectedCoverageDay = value),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedWklyCoverage,
+              decoration: InputDecoration(labelText: 'Wkly Coverage'),
+              items: _wklyCoverageMap.entries.map((e) => DropdownMenuItem(value: e.value, child: Text(e.key))).toList(),
+              onChanged: (value) => setState(() => _selectedWklyCoverage = value),
+            ),
+            TextField(controller: _phoneController, decoration: InputDecoration(labelText: 'Phone')),
+            TextField(controller: _firstNameController, decoration: InputDecoration(labelText: 'First Name')),
+            TextField(controller: _lastNameController, decoration: InputDecoration(labelText: 'Last Name')),
+            TextField(controller: _tinNoController, decoration: InputDecoration(labelText: 'TIN No')),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedProvince,
+              decoration: InputDecoration(labelText: 'Province'),
+              items: _provinces.map((prov) => DropdownMenuItem(value: prov, child: Text(prov))).toList(),
+              onChanged: (value) => setState(() {
+                _selectedProvince = value;
+                _updateCities();
+              }),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedCity,
+              decoration: InputDecoration(labelText: 'City'),
+              items: _cities.map((city) => DropdownMenuItem(value: city, child: Text(city))).toList(),
+              onChanged: (value) => setState(() {
+                _selectedCity = value;
+                _updateBarangays();
+              }),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedBarangay,
+              decoration: InputDecoration(labelText: 'Barangay'),
+              items: _barangays.map((brgy) => DropdownMenuItem(value: brgy, child: Text(brgy))).toList(),
+              onChanged: (value) => setState(() => _selectedBarangay = value),
+            ),
+            TextField(controller: _addressController, decoration: InputDecoration(labelText: 'Address')),
+            SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(onPressed: _reset, child: Text('Reset')),
+                ElevatedButton(onPressed: _submit, child: Text('Submit')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
