@@ -1,18 +1,22 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import '../models/customer.dart';
 import '../services/database_service.dart';
+import '../services/app_customization_notifier.dart';
 import '../services/routing_service.dart';
 import '../pages/customer_update_form.dart';
 import '../pages/capture_images_flow_page.dart';
+import 'branded_app_bar.dart';
 
 LocationSettings buildTrackingLocationSettings() {
   if (kIsWeb) {
@@ -62,6 +66,21 @@ class CustomerInfoModal extends StatefulWidget {
   State<CustomerInfoModal> createState() => _CustomerInfoModalState();
 }
 
+class _LocationAccessException implements Exception {
+  const _LocationAccessException(
+    this.message, {
+    this.canOpenAppSettings = false,
+    this.canOpenLocationSettings = false,
+  });
+
+  final String message;
+  final bool canOpenAppSettings;
+  final bool canOpenLocationSettings;
+
+  @override
+  String toString() => message;
+}
+
 class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final RoutingService _routingService = const RoutingService();
@@ -69,6 +88,7 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
   static const double _trackingZoom = 16.5;
   static const Duration _routeRefreshInterval = Duration(seconds: 6);
   static const double _routeRefreshDistanceMeters = 20;
+  static const double _offRouteDistanceMeters = 28;
   static const Duration _streamStallThreshold = Duration(seconds: 8);
   static const Duration _streamHealthCheckInterval = Duration(seconds: 4);
 
@@ -157,27 +177,97 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
     return '$current, $field';
   }
 
+  Future<void> _showLocationAccessDialog(_LocationAccessException error) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Location Access Needed'),
+          content: Text(error.message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            if (error.canOpenLocationSettings)
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await Geolocator.openLocationSettings();
+                },
+                child: const Text('Enable GPS'),
+              ),
+            if (error.canOpenAppSettings)
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await Geolocator.openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<Position> _determinePosition() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      throw Exception('Location services are disabled. Please enable GPS/location services.');
+      throw const _LocationAccessException(
+        'Location services are disabled. Please enable GPS/location services.',
+        canOpenLocationSettings: true,
+      );
     }
 
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        throw Exception('Location permission denied.');
+        throw const _LocationAccessException(
+          'Location permission was denied. Please allow location access to use live tracking and capture location.',
+          canOpenAppSettings: true,
+        );
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      throw Exception('Location permission permanently denied. Please allow location in app settings.');
+      throw const _LocationAccessException(
+        'Location permission is permanently denied. Please allow location in app settings.',
+        canOpenAppSettings: true,
+      );
     }
 
-    return Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    );
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+    } on TimeoutException {
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) return lastKnown;
+      rethrow;
+    }
+  }
+
+  void _applyTrackedPosition(Position position, {bool recenter = false, bool forceRoute = false}) {
+    if (!mounted) return;
+
+    final nextLatLng = LatLng(position.latitude, position.longitude);
+    setState(() {
+      _trackedPosition = position;
+      _animatedTrackedLatLng ??= nextLatLng;
+    });
+
+    _animateToTrackedPosition(position);
+    if (recenter) {
+      _centerMapOnTrackedPosition();
+    }
+    unawaited(_fetchRoadRoute(origin: position, force: forceRoute));
   }
 
   double? get _distanceToCustomerMeters {
@@ -214,11 +304,79 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
     return '${meters.toStringAsFixed(0)} m';
   }
 
-  bool _shouldRefreshRoute(Position origin) {
+  Duration _adaptiveRefreshIntervalFor(Position origin) {
+    final speedMps = origin.speed < 0 ? 0.0 : origin.speed;
+    if (speedMps >= 10) return const Duration(seconds: 3);
+    if (speedMps >= 5) return const Duration(seconds: 4);
+    return _routeRefreshInterval;
+  }
+
+  double _adaptiveRefreshDistanceFor(Position origin) {
+    final speedMps = origin.speed < 0 ? 0.0 : origin.speed;
+    if (speedMps >= 10) return 12;
+    if (speedMps >= 5) return 16;
+    return _routeRefreshDistanceMeters;
+  }
+
+  double? _distanceToPolylineMeters(LatLng point, List<LatLng> polyline) {
+    if (polyline.length < 2) return null;
+
+    double toMetersX(double lng, double refLat) => lng * 111320.0 * math.cos(refLat * math.pi / 180.0);
+    double toMetersY(double lat) => lat * 110540.0;
+
+    final px = toMetersX(point.longitude, point.latitude);
+    final py = toMetersY(point.latitude);
+
+    double minDistance = double.infinity;
+
+    for (var i = 0; i < polyline.length - 1; i++) {
+      final a = polyline[i];
+      final b = polyline[i + 1];
+
+      final ax = toMetersX(a.longitude, point.latitude);
+      final ay = toMetersY(a.latitude);
+      final bx = toMetersX(b.longitude, point.latitude);
+      final by = toMetersY(b.latitude);
+
+      final abx = bx - ax;
+      final aby = by - ay;
+      final apx = px - ax;
+      final apy = py - ay;
+      final abLenSq = abx * abx + aby * aby;
+      if (abLenSq == 0) continue;
+
+      final t = (apx * abx + apy * aby) / abLenSq;
+      final clampedT = t.clamp(0.0, 1.0);
+      final cx = ax + abx * clampedT;
+      final cy = ay + aby * clampedT;
+
+      final dx = px - cx;
+      final dy = py - cy;
+      final distance = math.sqrt(dx * dx + dy * dy);
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+
+    return minDistance.isFinite ? minDistance : null;
+  }
+
+  bool _isLikelyOffRoute(Position origin) {
+    if (_routePoints.length < 2) return false;
+    final distance = _distanceToPolylineMeters(
+      LatLng(origin.latitude, origin.longitude),
+      _routePoints,
+    );
+    return distance != null && distance > _offRouteDistanceMeters;
+  }
+
+  bool _shouldRefreshRoute(Position origin, {bool isOffRoute = false}) {
     if (_lastRouteOrigin == null || _lastRouteFetchAt == null) return true;
+    if (isOffRoute) return true;
 
     final elapsed = DateTime.now().difference(_lastRouteFetchAt!);
-    if (elapsed < _routeRefreshInterval) return false;
+    final refreshInterval = _adaptiveRefreshIntervalFor(origin);
+    if (elapsed < refreshInterval) return false;
 
     final moved = Geolocator.distanceBetween(
       _lastRouteOrigin!.latitude,
@@ -226,12 +384,13 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
       origin.latitude,
       origin.longitude,
     );
-    return moved >= _routeRefreshDistanceMeters;
+    return moved >= _adaptiveRefreshDistanceFor(origin);
   }
 
   Future<void> _fetchRoadRoute({required Position origin, bool force = false}) async {
     if (!_hasCustomerLocation || _isRouteLoading) return;
-    if (!force && !_shouldRefreshRoute(origin)) return;
+    final isOffRoute = _isLikelyOffRoute(origin);
+    if (!force && !_shouldRefreshRoute(origin, isOffRoute: isOffRoute)) return;
 
     if (mounted) {
       setState(() {
@@ -401,30 +560,13 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
     });
 
     try {
-      final initialPosition = await _determinePosition();
-      if (!mounted) return;
-
-      setState(() {
-        _trackedPosition = initialPosition;
-        _animatedTrackedLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
-        _isTracking = true;
-      });
-      _lastTrackingEventAt = DateTime.now();
-      _centerMapOnTrackedPosition();
-      await _fetchRoadRoute(origin: initialPosition, force: true);
-      _startTrackingHealthCheck();
-
       _trackingSubscription = Geolocator.getPositionStream(
         locationSettings: buildTrackingLocationSettings(),
       ).listen(
         (position) {
           if (!mounted) return;
           _lastTrackingEventAt = DateTime.now();
-          setState(() {
-            _trackedPosition = position;
-          });
-          _animateToTrackedPosition(position);
-          unawaited(_fetchRoadRoute(origin: position));
+          _applyTrackedPosition(position);
         },
         onError: (Object error) async {
           if (!mounted) return;
@@ -435,11 +577,35 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
           });
         },
       );
+
+      if (!mounted) return;
+      setState(() {
+        _isTracking = true;
+      });
+
+      _startTrackingHealthCheck();
+
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _isTracking) {
+        _lastTrackingEventAt = DateTime.now();
+        _applyTrackedPosition(lastKnown, recenter: true, forceRoute: true);
+      }
+
+      final initialPosition = await _determinePosition();
+      if (!mounted || !_isTracking) return;
+      _lastTrackingEventAt = DateTime.now();
+      _applyTrackedPosition(initialPosition, recenter: lastKnown == null, forceRoute: true);
     } catch (e) {
+      if (!mounted) return;
+      await _stopTracking();
       if (!mounted) return;
       setState(() {
         _trackingError = e.toString();
       });
+      if (e is _LocationAccessException) {
+        await _showLocationAccessDialog(e);
+        if (!mounted) return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Unable to start tracking: $e')),
       );
@@ -485,6 +651,18 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
+    final isJoshiTheme = context.watch<AppCustomizationNotifier>().isJoshiAOTheme;
+    final tileUrlTemplate = isJoshiTheme
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+    const labelsUrlTemplate = 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png';
+    final routeColor = isJoshiTheme
+      ? const Color(0xFF47E6FF)
+      : Theme.of(context).colorScheme.primary;
+    final userMarkerColor = isJoshiTheme
+      ? const Color(0xFF00E5FF)
+      : Theme.of(context).colorScheme.primary;
+    final customerPinColor = isJoshiTheme ? const Color(0xFFFF7A7A) : Colors.red;
     final trackedLatLng = _animatedTrackedLatLng ??
       (_trackedPosition == null ? null : LatLng(_trackedPosition!.latitude, _trackedPosition!.longitude));
     final distanceToCustomer = _routeDistanceMeters ?? _distanceToCustomerMeters;
@@ -513,17 +691,23 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
                         ),
                         children: [
                           TileLayer(
-                            urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                            urlTemplate: tileUrlTemplate,
                             subdomains: const ['a', 'b', 'c', 'd'],
                             userAgentPackageName: 'com.example.kenea_customers',
                           ),
+                          if (isJoshiTheme)
+                            TileLayer(
+                              urlTemplate: labelsUrlTemplate,
+                              subdomains: const ['a', 'b', 'c', 'd'],
+                              userAgentPackageName: 'com.example.kenea_customers',
+                            ),
                           if (trackedLatLng != null)
                             PolylineLayer(
                               polylines: [
                                 Polyline(
                                   points: _routePoints.length >= 2 ? _routePoints : [_customerLatLng, trackedLatLng],
                                   strokeWidth: 4,
-                                  color: Theme.of(context).colorScheme.primary,
+                                  color: routeColor,
                                 ),
                               ],
                             ),
@@ -532,9 +716,9 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
                               Marker(
                                 point: _customerLatLng,
                                 rotate: true,
-                                child: const Icon(
+                                child: Icon(
                                   Icons.location_pin,
-                                  color: Colors.red,
+                                  color: customerPinColor,
                                   size: 40,
                                 ),
                               ),
@@ -544,13 +728,15 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
                                   rotate: true,
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).colorScheme.primary,
+                                      color: userMarkerColor,
                                       shape: BoxShape.circle,
                                       border: Border.all(color: Colors.white, width: 2),
-                                      boxShadow: const [
+                                      boxShadow: [
                                         BoxShadow(
-                                          color: Color(0x33000000),
-                                          blurRadius: 8,
+                                          color: isJoshiTheme
+                                              ? const Color(0x8800E5FF)
+                                              : const Color(0x33000000),
+                                          blurRadius: isJoshiTheme ? 12 : 8,
                                           offset: Offset(0, 2),
                                         ),
                                       ],
@@ -788,6 +974,10 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTicker
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
+      if (e is _LocationAccessException) {
+        await _showLocationAccessDialog(e);
+        if (!mounted) return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Capture failed: $e')),
       );
@@ -886,6 +1076,7 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
   static const double _trackingZoom = 16.5;
   static const Duration _routeRefreshInterval = Duration(seconds: 6);
   static const double _routeRefreshDistanceMeters = 20;
+  static const double _offRouteDistanceMeters = 28;
   static const double _navigationAnchorYOffset = 180;
   static const Duration _streamStallThreshold = Duration(seconds: 8);
   static const Duration _streamHealthCheckInterval = Duration(seconds: 4);
@@ -1005,11 +1196,79 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
     });
   }
 
-  bool _shouldRefreshRoute(Position origin) {
+  Duration _adaptiveRefreshIntervalFor(Position origin) {
+    final speedMps = origin.speed < 0 ? 0.0 : origin.speed;
+    if (speedMps >= 10) return const Duration(seconds: 3);
+    if (speedMps >= 5) return const Duration(seconds: 4);
+    return _routeRefreshInterval;
+  }
+
+  double _adaptiveRefreshDistanceFor(Position origin) {
+    final speedMps = origin.speed < 0 ? 0.0 : origin.speed;
+    if (speedMps >= 10) return 12;
+    if (speedMps >= 5) return 16;
+    return _routeRefreshDistanceMeters;
+  }
+
+  double? _distanceToPolylineMeters(LatLng point, List<LatLng> polyline) {
+    if (polyline.length < 2) return null;
+
+    double toMetersX(double lng, double refLat) => lng * 111320.0 * math.cos(refLat * math.pi / 180.0);
+    double toMetersY(double lat) => lat * 110540.0;
+
+    final px = toMetersX(point.longitude, point.latitude);
+    final py = toMetersY(point.latitude);
+
+    double minDistance = double.infinity;
+
+    for (var i = 0; i < polyline.length - 1; i++) {
+      final a = polyline[i];
+      final b = polyline[i + 1];
+
+      final ax = toMetersX(a.longitude, point.latitude);
+      final ay = toMetersY(a.latitude);
+      final bx = toMetersX(b.longitude, point.latitude);
+      final by = toMetersY(b.latitude);
+
+      final abx = bx - ax;
+      final aby = by - ay;
+      final apx = px - ax;
+      final apy = py - ay;
+      final abLenSq = abx * abx + aby * aby;
+      if (abLenSq == 0) continue;
+
+      final t = (apx * abx + apy * aby) / abLenSq;
+      final clampedT = t.clamp(0.0, 1.0);
+      final cx = ax + abx * clampedT;
+      final cy = ay + aby * clampedT;
+
+      final dx = px - cx;
+      final dy = py - cy;
+      final distance = math.sqrt(dx * dx + dy * dy);
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+
+    return minDistance.isFinite ? minDistance : null;
+  }
+
+  bool _isLikelyOffRoute(Position origin) {
+    if (_liveRoutePoints.length < 2) return false;
+    final distance = _distanceToPolylineMeters(
+      LatLng(origin.latitude, origin.longitude),
+      _liveRoutePoints,
+    );
+    return distance != null && distance > _offRouteDistanceMeters;
+  }
+
+  bool _shouldRefreshRoute(Position origin, {bool isOffRoute = false}) {
     if (_lastRouteOrigin == null || _lastRouteFetchAt == null) return true;
+    if (isOffRoute) return true;
 
     final elapsed = DateTime.now().difference(_lastRouteFetchAt!);
-    if (elapsed < _routeRefreshInterval) return false;
+    final refreshInterval = _adaptiveRefreshIntervalFor(origin);
+    if (elapsed < refreshInterval) return false;
 
     final moved = Geolocator.distanceBetween(
       _lastRouteOrigin!.latitude,
@@ -1017,12 +1276,13 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
       origin.latitude,
       origin.longitude,
     );
-    return moved >= _routeRefreshDistanceMeters;
+    return moved >= _adaptiveRefreshDistanceFor(origin);
   }
 
   Future<void> _fetchLiveRoute(Position origin, {bool force = false}) async {
     if (_isLiveRouteLoading) return;
-    if (!force && !_shouldRefreshRoute(origin)) return;
+    final isOffRoute = _isLikelyOffRoute(origin);
+    if (!force && !_shouldRefreshRoute(origin, isOffRoute: isOffRoute)) return;
 
     if (mounted) {
       setState(() {
@@ -1211,6 +1471,18 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
 
   @override
   Widget build(BuildContext context) {
+    final isJoshiTheme = context.watch<AppCustomizationNotifier>().isJoshiAOTheme;
+    final tileUrlTemplate = isJoshiTheme
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+    const labelsUrlTemplate = 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png';
+    final routeColor = isJoshiTheme
+      ? const Color(0xFF47E6FF)
+      : Theme.of(context).colorScheme.primary;
+    final userMarkerColor = isJoshiTheme
+      ? const Color(0xFF00E5FF)
+      : Theme.of(context).colorScheme.primary;
+    final customerPinColor = isJoshiTheme ? const Color(0xFFFF7A7A) : Colors.red;
     final trackedLatLng = _animatedTrackedLatLng;
     final customerLatLng = widget.customerLatLng;
     final linePoints = trackedLatLng == null
@@ -1226,7 +1498,8 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
         : InteractiveFlag.all;
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: buildBrandedAppBar(
+        context: context,
         title: const Text('Direction Map'),
       ),
       body: Stack(
@@ -1240,17 +1513,23 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                urlTemplate: tileUrlTemplate,
                 subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.example.kenea_customers',
               ),
+              if (isJoshiTheme)
+                TileLayer(
+                  urlTemplate: labelsUrlTemplate,
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  userAgentPackageName: 'com.example.kenea_customers',
+                ),
               if (linePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: linePoints,
                       strokeWidth: 5,
-                      color: Theme.of(context).colorScheme.primary,
+                      color: routeColor,
                     ),
                   ],
                 ),
@@ -1259,9 +1538,9 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
                   Marker(
                     point: customerLatLng,
                     rotate: true,
-                    child: const Icon(
+                    child: Icon(
                       Icons.location_pin,
-                      color: Colors.red,
+                      color: customerPinColor,
                       size: 40,
                     ),
                   ),
@@ -1271,9 +1550,18 @@ class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with S
                       rotate: true,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
+                          color: userMarkerColor,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isJoshiTheme
+                                  ? const Color(0x8800E5FF)
+                                  : const Color(0x33000000),
+                              blurRadius: isJoshiTheme ? 12 : 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: const SizedBox(width: 18, height: 18),
                       ),

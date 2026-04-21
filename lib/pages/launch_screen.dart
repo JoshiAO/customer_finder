@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../theme/ke_theme.dart';
+import 'package:provider/provider.dart';
+import '../config/app_private_config.dart';
+import '../services/app_customization_notifier.dart';
 
 class LaunchScreen extends StatefulWidget {
   const LaunchScreen({super.key, required this.onDone});
@@ -56,16 +58,35 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
+    final customization = context.watch<AppCustomizationNotifier>();
+    final launchTitle = customization.launchTitle;
+    final launchLogoProvider = customization.launchLogoImageProvider;
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final gradientTop = Color.alphaBlend(
+      scheme.primary.withValues(alpha: isDark ? 0.20 : 0.12),
+      scheme.surface,
+    );
+    final gradientMid = Color.alphaBlend(
+      scheme.secondary.withValues(alpha: isDark ? 0.22 : 0.14),
+      scheme.surface,
+    );
+    final gradientBottom = Color.alphaBlend(
+      scheme.tertiary.withValues(alpha: isDark ? 0.18 : 0.10),
+      scheme.surface,
+    );
+
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              KEPalette.cloud,
-              KEPalette.mist,
-              Color(0xFFDCEBFF),
+              gradientTop,
+              gradientMid,
+              gradientBottom,
             ],
           ),
         ),
@@ -85,7 +106,7 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
                         borderRadius: BorderRadius.circular(28),
                         boxShadow: const [
                           BoxShadow(
-                            color: Color(0x3A2D6FC2),
+                            color: Color(0x33000000),
                             blurRadius: 22,
                             offset: Offset(0, 10),
                           ),
@@ -93,25 +114,21 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(28),
-                        child: Image.asset(
-                          'assets/images/KE LOGO.png',
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: KEPalette.logoBlue,
-                              alignment: Alignment.center,
-                              child: const Text(
-                                'KE',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 64,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 2,
-                                ),
+                        child: launchLogoProvider != null
+                            ? Image(
+                                image: launchLogoProvider,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return _fallbackLaunchLogo(launchTitle);
+                                },
+                              )
+                            : Image.asset(
+                                AppPrivateConfig.launchLogoAsset,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return _fallbackLaunchLogo(launchTitle);
+                                },
                               ),
-                            );
-                          },
-                        ),
                       ),
                     ),
                   ),
@@ -123,18 +140,18 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
                     final glow = 3 + (7 * _textController.value);
                     return ShaderMask(
                       shaderCallback: (bounds) {
-                        return const LinearGradient(
+                        return LinearGradient(
                           begin: Alignment.centerLeft,
                           end: Alignment.centerRight,
                           colors: [
-                            KEPalette.logoBlueDark,
-                            KEPalette.logoBlue,
-                            KEPalette.logoBlueLight,
+                            scheme.primary,
+                            scheme.tertiary,
+                            scheme.secondary,
                           ],
                         ).createShader(bounds);
                       },
                       child: Text(
-                        'KENEA.RDSI Project',
+                        launchTitle,
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w800,
@@ -142,7 +159,7 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
                           color: Colors.white,
                           shadows: [
                             Shadow(
-                              color: KEPalette.logoBlue.withValues(alpha: 0.55),
+                                color: scheme.primary.withValues(alpha: 0.55),
                               blurRadius: glow,
                               offset: const Offset(0, 1),
                             ),
@@ -155,6 +172,24 @@ class _LaunchScreenState extends State<LaunchScreen> with TickerProviderStateMix
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fallbackLaunchLogo(String title) {
+    final safeTitle = title.trim();
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      color: primary,
+      alignment: Alignment.center,
+      child: Text(
+        safeTitle.isEmpty ? 'APP' : safeTitle.substring(0, 1).toUpperCase(),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 64,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 2,
         ),
       ),
     );

@@ -9,46 +9,26 @@ class KEPalette {
 }
 
 class KETheme {
-  static ThemeData light() {
-    const primary = KEPalette.logoBlue;
-    const onPrimary = Colors.white;
-    const secondary = KEPalette.logoBlueLight;
-    const onSurface = Color(0xFF163250);
-
-    final scheme = const ColorScheme(
-      brightness: Brightness.light,
-      primary: primary,
-      onPrimary: onPrimary,
-      secondary: secondary,
-      onSecondary: Color(0xFF0D325F),
-      error: Color(0xFFB3261E),
-      onError: Colors.white,
-      surface: Colors.white,
-      onSurface: onSurface,
-      primaryContainer: Color(0xFFDCEBFF),
-      onPrimaryContainer: Color(0xFF0E4A87),
-      secondaryContainer: Color(0xFFEAF3FF),
-      onSecondaryContainer: Color(0xFF0D325F),
-      tertiary: Color(0xFF1E6FBE),
-      onTertiary: Colors.white,
-      tertiaryContainer: Color(0xFFD9EAFF),
-      onTertiaryContainer: Color(0xFF0D325F),
-      outline: Color(0xFF9CB9DD),
-      shadow: Color(0x33000000),
-      surfaceTint: primary,
-      inverseSurface: Color(0xFF203243),
-      onInverseSurface: Colors.white,
-      inversePrimary: Color(0xFF9ECAFF),
-      scrim: Colors.black,
+  static ThemeData fromSeed({
+    required Color seedColor,
+    required Brightness brightness,
+  }) {
+    final scheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: brightness,
     );
+
+    final scaffoldBackground = brightness == Brightness.dark
+        ? Color.alphaBlend(seedColor.withValues(alpha: 0.14), const Color(0xFF111417))
+        : Color.alphaBlend(seedColor.withValues(alpha: 0.08), Colors.white);
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      scaffoldBackgroundColor: KEPalette.cloud,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: primary,
-        foregroundColor: onPrimary,
+      scaffoldBackgroundColor: scaffoldBackground,
+      appBarTheme: AppBarTheme(
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
         elevation: 0,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -61,22 +41,26 @@ class KETheme {
           ),
         ),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: primary,
-        linearTrackColor: Color(0xFFDCEBFF),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: scheme.primary,
+        linearTrackColor: scheme.primaryContainer,
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: Colors.white,
+        backgroundColor: scheme.surface,
         selectedItemColor: scheme.primary,
         unselectedItemColor: scheme.onSurface.withValues(alpha: 0.62),
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
         type: BottomNavigationBarType.fixed,
       ),
       cardTheme: CardThemeData(
-        color: Colors.white,
+        color: scheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         elevation: 2,
       ),
     );
+  }
+
+  static ThemeData light() {
+    return fromSeed(seedColor: KEPalette.logoBlue, brightness: Brightness.light);
   }
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../widgets/branded_app_bar.dart';
 
 class CaptureImagesFlowPage extends StatefulWidget {
   const CaptureImagesFlowPage({super.key});
@@ -53,7 +54,8 @@ class _CaptureImagesFlowPageState extends State<CaptureImagesFlowPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      appBar: buildBrandedAppBar(
+        context: context,
         title: const Text('Capture Images'),
       ),
       body: Padding(
@@ -126,15 +128,23 @@ class _ImagePreviewPageState extends State<ImagePreviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Scaffold(
-      appBar: AppBar(
+      appBar: buildBrandedAppBar(
+        context: context,
         title: const Text('Preview Captured Images'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, _images),
+            style: TextButton.styleFrom(
+              foregroundColor: isDark
+                  ? Colors.white.withValues(alpha: 0.96)
+                  : onSurface.withValues(alpha: 0.94),
+            ),
             child: const Text(
               'Submit Images',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
         ],

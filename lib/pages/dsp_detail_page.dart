@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../services/database_service.dart';
+import '../services/app_customization_notifier.dart';
 import '../models/dsp.dart';
 import '../models/customer.dart';
 import '../widgets/customer_info_modal.dart';
+import '../widgets/branded_app_bar.dart';
 
 class DSPDetailPage extends StatefulWidget {
   final DSP dsp;
@@ -69,8 +72,12 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final customization = context.watch<AppCustomizationNotifier>();
+    final isJoshiTheme = customization.isJoshiAOTheme;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
+      appBar: buildBrandedAppBar(
+        context: context,
         title: Text(widget.dsp.salesRepName),
         actions: [
           IconButton(
@@ -179,59 +186,94 @@ class _DSPDetailPageState extends State<DSPDetailPage> {
                       final statusColor = isActive ? Colors.green : Colors.red;
                       final hasLocation = _hasValidLocation(customer);
                       final mapColor = hasLocation ? Colors.green : Colors.red;
-                      return Card(
-                        margin: EdgeInsets.all(8.0),
-                        child: ListTile(
-                          title: Text(customer.customerCode),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(customer.customerName),
-                              Text(customer.phone),
-                              Text('${customer.firstName} ${customer.lastName}'.trim()),
-                              Text(customer.address),
-                              Text(customer.partyClassificationDescription),
-                              Text(customer.coverageDay),
-                              Text(customer.wklyCoverage),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Column(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Icon(Icons.map, size: 18, color: mapColor),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.circle, size: 10, color: statusColor),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        customer.status,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: statusColor,
-                                        ),
+
+                      final tile = ListTile(
+                        title: Text(customer.customerCode),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(customer.customerName),
+                            Text(customer.phone),
+                            Text('${customer.firstName} ${customer.lastName}'.trim()),
+                            Text(customer.address),
+                            Text(customer.partyClassificationDescription),
+                            Text(customer.coverageDay),
+                            Text(customer.wklyCoverage),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Icon(Icons.map, size: 18, color: mapColor),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.circle, size: 10, color: statusColor),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      customer.status,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: statusColor,
                                       ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        onTap: () async {
+                          final didUpdate = await showModalBottomSheet<bool>(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (context) => CustomerInfoModal(customer: customer),
+                          );
+                          if (didUpdate == true && mounted) {
+                            setState(_loadCustomers);
+                          }
+                        },
+                      );
+
+                      if (!isJoshiTheme) {
+                        return Card(
+                          margin: const EdgeInsets.all(8.0),
+                          child: tile,
+                        );
+                      }
+
+                      return Card(
+                        margin: const EdgeInsets.all(8.0),
+                        clipBehavior: Clip.antiAlias,
+                        color: Colors.transparent,
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color.alphaBlend(
+                                  scheme.primary.withValues(alpha: 0.26),
+                                  scheme.surface,
+                                ),
+                                Color.alphaBlend(
+                                  scheme.tertiary.withValues(alpha: 0.22),
+                                  scheme.surface,
+                                ),
+                              ],
+                            ),
+                            border: Border.all(color: scheme.outline.withValues(alpha: 0.35)),
                           ),
-                          onTap: () async {
-                            final didUpdate = await showModalBottomSheet<bool>(
-                              context: context,
-                              isScrollControlled: true,
-                              builder: (context) => CustomerInfoModal(customer: customer),
-                            );
-                            if (didUpdate == true && mounted) {
-                              setState(_loadCustomers);
-                            }
-                          },
+                          child: ListTileTheme(
+                            textColor: Colors.white.withValues(alpha: 0.96),
+                            iconColor: Colors.white.withValues(alpha: 0.96),
+                            child: tile,
+                          ),
                         ),
                       );
                     },

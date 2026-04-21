@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:provider/provider.dart';
 import '../services/database_service.dart';
+import '../services/app_customization_notifier.dart';
 import '../models/dsp.dart';
 import 'dsp_detail_page.dart';
+import '../widgets/branded_app_bar.dart';
 
 class DSPPage extends StatefulWidget {
   const DSPPage({super.key});
@@ -69,8 +72,14 @@ class _DSPPageState extends State<DSPPage> {
 
   @override
   Widget build(BuildContext context) {
+    final customization = context.watch<AppCustomizationNotifier>();
+    final isJoshiTheme = customization.isJoshiAOTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Scaffold(
-      appBar: AppBar(
+      appBar: buildBrandedAppBar(
+        context: context,
         title: const Text('DSP'),
         actions: [
           TextButton.icon(
@@ -78,7 +87,9 @@ class _DSPPageState extends State<DSPPage> {
             icon: const Icon(Icons.upload_file),
             label: const Text('DSP List'),
             style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              foregroundColor: isDark
+                  ? Colors.white.withValues(alpha: 0.96)
+                  : onSurface.withValues(alpha: 0.94),
             ),
           ),
         ],
@@ -155,20 +166,55 @@ class _DSPPageState extends State<DSPPage> {
                       final dspCodeText = dsp.dspCode.trim().isEmpty ? 'N/A' : dsp.dspCode.trim();
                       final dspNameText = dsp.salesRepName.trim().isEmpty ? 'N/A' : dsp.salesRepName.trim();
                       final teamText = dsp.team.trim().isEmpty ? 'No Team' : dsp.team.trim();
+
+                      final tile = ListTile(
+                        title: Text('$dspCodeText - $dspNameText'),
+                        subtitle: Text('Team: $teamText\nActive: ${dsp.activeCount} / Blocked: ${dsp.blockedCount}'),
+                        isThreeLine: true,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => DSPDetailPage(dsp: dsp),
+                            ),
+                          );
+                        },
+                      );
+
+                      if (!isJoshiTheme) {
+                        return Card(
+                          margin: const EdgeInsets.all(8.0),
+                          child: tile,
+                        );
+                      }
+
                       return Card(
                         margin: const EdgeInsets.all(8.0),
-                        child: ListTile(
-                          title: Text('$dspCodeText - $dspNameText'),
-                          subtitle: Text('Team: $teamText\nActive: ${dsp.activeCount} / Blocked: ${dsp.blockedCount}'),
-                          isThreeLine: true,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DSPDetailPage(dsp: dsp),
-                              ),
-                            );
-                          },
+                        clipBehavior: Clip.antiAlias,
+                        color: Colors.transparent,
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color.alphaBlend(
+                                  scheme.primary.withValues(alpha: 0.26),
+                                  scheme.surface,
+                                ),
+                                Color.alphaBlend(
+                                  scheme.tertiary.withValues(alpha: 0.22),
+                                  scheme.surface,
+                                ),
+                              ],
+                            ),
+                            border: Border.all(color: scheme.outline.withValues(alpha: 0.35)),
+                          ),
+                          child: ListTileTheme(
+                            textColor: Colors.white.withValues(alpha: 0.96),
+                            iconColor: Colors.white.withValues(alpha: 0.96),
+                            child: tile,
+                          ),
                         ),
                       );
                     },

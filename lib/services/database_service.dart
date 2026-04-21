@@ -24,12 +24,19 @@ class DatabaseService {
   final customerStore = intMapStoreFactory.store('customers');
   final dspStore = intMapStoreFactory.store('dsps');
   Uint8List? _dspMasterOverrideBytes;
+  Uint8List? _areaMasterOverrideBytes;
   bool _attemptedLocationRepair = false;
 
   Future<String?> _persistedDspCsvPath() async {
     if (kIsWeb) return null;
     final dir = await getApplicationDocumentsDirectory();
     return p.join(dir.path, 'dsp_master_override.csv');
+  }
+
+  Future<String?> _persistedAreaCsvPath() async {
+    if (kIsWeb) return null;
+    final dir = await getApplicationDocumentsDirectory();
+    return p.join(dir.path, 'area_master_override.csv');
   }
 
   Future<String?> _persistedCmlPath() async {
@@ -81,6 +88,21 @@ class DatabaseService {
 
   Future<Uint8List?> _readPersistedDspCsv() async {
     final path = await _persistedDspCsvPath();
+    if (path == null) return null;
+    final file = File(path);
+    if (!await file.exists()) return null;
+    return Uint8List.fromList(await file.readAsBytes());
+  }
+
+  Future<void> _savePersistedAreaCsv(Uint8List bytes) async {
+    final path = await _persistedAreaCsvPath();
+    if (path == null) return;
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
+  }
+
+  Future<Uint8List?> _readPersistedAreaCsv() async {
+    final path = await _persistedAreaCsvPath();
     if (path == null) return null;
     final file = File(path);
     if (!await file.exists()) return null;
@@ -242,6 +264,57 @@ class DatabaseService {
     return parsed;
   }
 
+  List<Map<String, dynamic>> _parseAreaMasterFromBytes(Uint8List bytes) {
+    final csvContent = utf8
+        .decode(bytes, allowMalformed: true)
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
+    final csvTable = CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvContent);
+    if (csvTable.isEmpty) return [];
+
+    var startIndex = 0;
+    if (csvTable.first.length >= 3) {
+      final firstA = _cleanLocationValue(csvTable.first[0].toString()).toLowerCase();
+      final firstB = _cleanLocationValue(csvTable.first[1].toString()).toLowerCase();
+      final firstC = _cleanLocationValue(csvTable.first[2].toString()).toLowerCase();
+      if (firstA == 'province' && firstB == 'city' && firstC == 'barangay') {
+        startIndex = 1;
+      }
+    }
+
+    final seen = <String>{};
+    final rows = <Map<String, dynamic>>[];
+
+    for (var i = startIndex; i < csvTable.length; i++) {
+      final row = csvTable[i];
+      if (row.length < 3) continue;
+
+      final province = _cleanLocationValue(row[0].toString());
+      final city = _cleanLocationValue(row[1].toString());
+      final barangay = _cleanLocationValue(row[2].toString());
+      if (province.isEmpty || city.isEmpty || barangay.isEmpty) continue;
+
+      final key = '${_canonicalLocationValue(province)}|${_canonicalLocationValue(city)}|${_canonicalLocationValue(barangay)}';
+      if (!seen.add(key)) continue;
+
+      rows.add({
+        'province': province,
+        'city': city,
+        'barangay': barangay,
+      });
+    }
+
+    rows.sort((a, b) {
+      final p = (a['province'] as String).compareTo(b['province'] as String);
+      if (p != 0) return p;
+      final c = (a['city'] as String).compareTo(b['city'] as String);
+      if (c != 0) return c;
+      return (a['barangay'] as String).compareTo(b['barangay'] as String);
+    });
+
+    return rows;
+  }
+
   Future<List<Map<String, String>>> _loadDspMasterRows() async {
     if (_dspMasterOverrideBytes != null) {
       final rows = _parseDspMasterFromBytes(_dspMasterOverrideBytes!);
@@ -260,6 +333,27 @@ class DatabaseService {
       return _parseDspMasterFromBytes(assetBytes.buffer.asUint8List());
     } catch (_) {
       return <Map<String, String>>[];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadAreaMasterRows() async {
+    if (_areaMasterOverrideBytes != null) {
+      final rows = _parseAreaMasterFromBytes(_areaMasterOverrideBytes!);
+      if (rows.isNotEmpty) return rows;
+    }
+
+    final persistedBytes = await _readPersistedAreaCsv();
+    if (persistedBytes != null) {
+      _areaMasterOverrideBytes = persistedBytes;
+      final rows = _parseAreaMasterFromBytes(persistedBytes);
+      if (rows.isNotEmpty) return rows;
+    }
+
+    try {
+      final assetBytes = await rootBundle.load('assets/Area.csv');
+      return _parseAreaMasterFromBytes(assetBytes.buffer.asUint8List());
+    } catch (_) {
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -392,6 +486,17 @@ class DatabaseService {
 
     _dspMasterOverrideBytes = bytes;
     await _savePersistedDspCsv(bytes);
+  }
+
+  Future<int> importAreaHierarchyCsv(Uint8List bytes) async {
+    final rows = _parseAreaMasterFromBytes(bytes);
+    if (rows.isEmpty) {
+      throw Exception('No valid area rows found. Expected Province,City,Barangay CSV.');
+    }
+
+    _areaMasterOverrideBytes = bytes;
+    await _savePersistedAreaCsv(bytes);
+    return rows.length;
   }
 
   Future<int> updateCML(Uint8List bytes, {bool isXlsx = false, void Function(double)? onProgress}) async {
@@ -705,29 +810,20 @@ class DatabaseService {
   }
 
   Future<List<Map<String, dynamic>>> loadAreas() async {
+    final masterAreas = await _loadAreaMasterRows();
     final seen = <String>{};
     final result = <Map<String, dynamic>>[];
 
-    try {
-      final csvRaw = await rootBundle.loadString('assets/Area.csv');
-      final csvTable = CsvToListConverter(eol: '\n', shouldParseNumbers: false)
-          .convert(csvRaw.replaceAll('\r\n', '\n').replaceAll('\r', '\n'));
+    for (final area in masterAreas) {
+      final province = _cleanLocationValue(area['province'] as String?);
+      final city = _cleanLocationValue(area['city'] as String?);
+      final barangay = _cleanLocationValue(area['barangay'] as String?);
+      if (province.isEmpty || city.isEmpty || barangay.isEmpty) continue;
 
-      for (var i = 1; i < csvTable.length; i++) {
-        final row = csvTable[i];
-        if (row.length < 3) continue;
-        final province = _cleanLocationValue(row[0].toString());
-        final city = _cleanLocationValue(row[1].toString());
-        final barangay = _cleanLocationValue(row[2].toString());
-        if (province.isEmpty || city.isEmpty || barangay.isEmpty) continue;
-
-        final key = '${_canonicalLocationValue(province)}|${_canonicalLocationValue(city)}|${_canonicalLocationValue(barangay)}';
-        if (seen.add(key)) {
-          result.add({'province': province, 'city': city, 'barangay': barangay});
-        }
+      final key = '${_canonicalLocationValue(province)}|${_canonicalLocationValue(city)}|${_canonicalLocationValue(barangay)}';
+      if (seen.add(key)) {
+        result.add({'province': province, 'city': city, 'barangay': barangay});
       }
-    } catch (_) {
-      // Continue and build areas from customer data when asset read fails.
     }
 
     final db = await database;
@@ -756,6 +852,11 @@ class DatabaseService {
     });
 
     return result;
+  }
+
+  Future<List<Map<String, dynamic>>> loadAreaHierarchy() async {
+    final rows = await _loadAreaMasterRows();
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> loadCustomerAreas() async {

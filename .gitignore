@@ -46,3 +46,6 @@ app.*.map.json
 
 # Node.js backend dependencies
 /backend/node_modules/
+
+# Local app database scratch file
+.tmp_kenea_sembast.db

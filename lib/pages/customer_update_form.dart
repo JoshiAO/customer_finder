@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/customer.dart';
 import '../services/database_service.dart';
+import '../widgets/branded_app_bar.dart';
 
 class CustomerUpdateForm extends StatefulWidget {
   final Customer customer;
@@ -177,8 +178,9 @@ class _CustomerUpdateFormState extends State<CustomerUpdateForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Update Customer Info'),
+      appBar: buildBrandedAppBar(
+        context: context,
+        title: const Text('Update Customer Info'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),

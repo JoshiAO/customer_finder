@@ -7,7 +7,9 @@ import 'package:file_saver/file_saver.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import '../config/app_private_config.dart';
 import '../services/database_service.dart';
+import '../services/app_customization_notifier.dart';
 import '../services/import_notifier.dart';
 import '../models/counts.dart';
 
@@ -298,19 +300,370 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _pickHomeBackgroundImage() async {
+    final pickerResult = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+
+    if (pickerResult == null || pickerResult.files.isEmpty) return;
+    final selected = pickerResult.files.single;
+    final bytes = selected.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to read selected image.')),
+      );
+      return;
+    }
+
+    final extRaw = selected.extension?.toLowerCase() ?? 'png';
+    final ext = extRaw.startsWith('.') ? extRaw : '.$extRaw';
+    if (!mounted) return;
+    final customization = context.read<AppCustomizationNotifier>();
+    await customization.setHomeBackgroundImage(bytes: bytes, extension: ext);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Home background updated.')),
+    );
+  }
+
+  Future<void> _pickLaunchLogoImage() async {
+    final pickerResult = await FilePicker.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+
+    if (pickerResult == null || pickerResult.files.isEmpty) return;
+    final selected = pickerResult.files.single;
+    final bytes = selected.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to read selected launch image.')),
+      );
+      return;
+    }
+
+    final extRaw = selected.extension?.toLowerCase() ?? 'png';
+    final ext = extRaw.startsWith('.') ? extRaw : '.$extRaw';
+    if (!mounted) return;
+    final customization = context.read<AppCustomizationNotifier>();
+    await customization.setLaunchLogoImage(bytes: bytes, extension: ext);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Launch logo updated.')),
+    );
+  }
+
+  Future<void> _showThemeCustomizationSheet() async {
+    const seedOptions = <Color>[
+      Color(0xFF2F3240),
+      Color(0xFF2F7FD1),
+      Color(0xFF0F766E),
+      Color(0xFFB45309),
+      Color(0xFF9D174D),
+      Color(0xFF4C1D95),
+      Color(0xFF374151),
+    ];
+
+    if (!mounted) return;
+    final customization = context.read<AppCustomizationNotifier>();
+    var launchTitleDraft = customization.launchTitle;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return Consumer<AppCustomizationNotifier>(
+          builder: (context, customizationState, _) {
+            final scheme = Theme.of(context).colorScheme;
+            final isJoshiLocked = customizationState.isJoshiAOTheme;
+            return SafeArea(
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                child: FractionallySizedBox(
+                  heightFactor: 0.9,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+              Text(
+                'Theme & Personalization',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: customizationState.themeName,
+                decoration: const InputDecoration(
+                  labelText: 'Theme Preset',
+                  border: OutlineInputBorder(),
+                ),
+                items: customizationState.availableThemeNames
+                    .map((name) => DropdownMenuItem<String>(
+                          value: name,
+                          child: Text(name),
+                        ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  customization.setThemeName(value);
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<ThemeMode>(
+                initialValue: customizationState.themeMode,
+                decoration: InputDecoration(
+                  labelText: 'Theme Mode',
+                  border: OutlineInputBorder(),
+                  helperText: isJoshiLocked ? 'Locked in JoshiAO Theme (Dark mode).' : null,
+                ),
+                items: const [
+                  DropdownMenuItem(value: ThemeMode.system, child: Text('System')),
+                  DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
+                  DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+                ],
+                onChanged: isJoshiLocked ? null : (value) {
+                  if (value == null) return;
+                  customization.setThemeMode(value);
+                },
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Accent Color',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final color in seedOptions)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: isJoshiLocked ? null : () => customization.setSeedColor(color),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: customizationState.seedColor.toARGB32() == color.toARGB32()
+                                ? scheme.onSurface
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (isJoshiLocked)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Accent color is locked for JoshiAO Theme.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickHomeBackgroundImage,
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('Import Background'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: customizationState.homeBackgroundImageProvider == null
+                          ? null
+                          : customization.clearHomeBackgroundImage,
+                      icon: const Icon(Icons.hide_image_outlined),
+                      label: const Text('Remove Background'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Launch Branding',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                initialValue: launchTitleDraft,
+                onChanged: (value) {
+                  launchTitleDraft = value;
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Launch Text',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => customization.setLaunchTitle(launchTitleDraft),
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('Save Launch Text'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickLaunchLogoImage,
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('Import Launch Logo'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: customizationState.launchLogoImageProvider == null
+                          ? null
+                          : customization.clearLaunchLogoImage,
+                      icon: const Icon(Icons.restore_outlined),
+                      label: const Text('Use Default Launch Logo'),
+                    ),
+                  ),
+                ],
+              ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final customization = context.watch<AppCustomizationNotifier>();
     final scheme = Theme.of(context).colorScheme;
+    final backgroundImage = customization.homeBackgroundImageProvider;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Customer Finder'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: isDark
+            ? Colors.white.withValues(alpha: 0.98)
+            : scheme.onSurface.withValues(alpha: 0.94),
+        iconTheme: IconThemeData(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.98)
+              : scheme.onSurface.withValues(alpha: 0.94),
+        ),
+        actionsIconTheme: IconThemeData(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.98)
+              : scheme.onSurface.withValues(alpha: 0.94),
+        ),
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.alphaBlend(
+                  scheme.primary.withValues(alpha: isDark ? 0.42 : 0.20),
+                  scheme.surface,
+                ),
+                Color.alphaBlend(
+                  scheme.tertiary.withValues(alpha: isDark ? 0.34 : 0.16),
+                  scheme.surface,
+                ),
+              ],
+            ),
+            border: Border(
+              bottom: BorderSide(
+                color: scheme.outline.withValues(alpha: isDark ? 0.38 : 0.22),
+                width: 1,
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: scheme.primary.withValues(alpha: isDark ? 0.22 : 0.12),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+        ),
+        leadingWidth: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 10, top: 8, bottom: 8),
+          child: Material(
+            color: scheme.surface.withValues(alpha: isDark ? 0.20 : 0.32),
+            borderRadius: BorderRadius.circular(999),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: _showThemeCustomizationSheet,
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.palette_outlined),
+              ),
+            ),
+          ),
+        ),
+        title: Text(
+          AppPrivateConfig.appName,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.98)
+                : scheme.onSurface.withValues(alpha: 0.94),
+          ),
+        ),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: _refresh,
+          Padding(
+            padding: const EdgeInsets.only(right: 10, top: 8, bottom: 8),
+            child: Material(
+              color: scheme.surface.withValues(alpha: isDark ? 0.20 : 0.32),
+              borderRadius: BorderRadius.circular(999),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: _refresh,
+                child: const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Icon(Icons.refresh),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -323,20 +676,47 @@ class _HomePageState extends State<HomePage> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    scheme.secondaryContainer,
+                    Color.alphaBlend(
+                      scheme.primary.withValues(alpha: isDark ? 0.12 : 0.06),
+                      scheme.surface,
+                    ),
+                    Color.alphaBlend(
+                      scheme.secondary.withValues(alpha: isDark ? 0.16 : 0.08),
+                      scheme.surface,
+                    ),
                     scheme.surface,
                   ],
                 ),
               ),
             ),
           ),
+          if (backgroundImage != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Image(
+                  image: backgroundImage,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          if (backgroundImage != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.35)
+                      : Colors.white.withValues(alpha: 0.28),
+                ),
+              ),
+            ),
           Positioned(
             left: -24,
             right: -24,
             bottom: -20,
             child: IgnorePointer(
               child: Opacity(
-                opacity: 0.18,
+                opacity: isDark ? 0.10 : 0.18,
                 child: Image.asset(
                   'assets/images/Cluster 1-6.png',
                   fit: BoxFit.fitWidth,
@@ -348,16 +728,22 @@ class _HomePageState extends State<HomePage> {
           Positioned.fill(
             child: IgnorePointer(
               child: Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Color(0xCCFFFFFF),
-                      Color(0xB3FFFFFF),
-                      Color(0x99FFFFFF),
+                      if (isDark) ...[
+                        Colors.black.withValues(alpha: 0.26),
+                        Colors.black.withValues(alpha: 0.18),
+                        Colors.black.withValues(alpha: 0.10),
+                      ] else ...[
+                        const Color(0xCCFFFFFF),
+                        const Color(0xB3FFFFFF),
+                        const Color(0x99FFFFFF),
+                      ],
                     ],
-                    stops: [0.0, 0.5, 1.0],
+                    stops: const [0.0, 0.5, 1.0],
                   ),
                 ),
               ),
@@ -378,12 +764,21 @@ class _HomePageState extends State<HomePage> {
                     margin: const EdgeInsets.symmetric(horizontal: 18),
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
                     decoration: BoxDecoration(
-                      color: scheme.surface.withValues(alpha: 0.84),
+                      color: isDark
+                          ? Color.alphaBlend(
+                              scheme.primary.withValues(alpha: 0.10),
+                              scheme.surface,
+                            ).withValues(alpha: 0.94)
+                          : scheme.surface.withValues(alpha: 0.84),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: scheme.primaryContainer),
+                      border: Border.all(
+                        color: isDark
+                            ? scheme.outline.withValues(alpha: 0.35)
+                            : scheme.primaryContainer,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: scheme.primary.withValues(alpha: 0.15),
+                          color: scheme.primary.withValues(alpha: isDark ? 0.24 : 0.15),
                           blurRadius: 16,
                           offset: const Offset(0, 8),
                         ),
@@ -466,17 +861,6 @@ class _HomePageState extends State<HomePage> {
                   );
                 }
               },
-            ),
-          ),
-          Positioned(
-            bottom: MediaQuery.of(context).size.height * 0.10,
-            left: 0,
-            right: 0,
-            child: const Center(
-              child: Text(
-                'Created by Joshua A. Ocampo',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
             ),
           ),
         ],
