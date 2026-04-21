@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -13,6 +14,45 @@ import '../services/routing_service.dart';
 import '../pages/customer_update_form.dart';
 import '../pages/capture_images_flow_page.dart';
 
+LocationSettings buildTrackingLocationSettings() {
+  if (kIsWeb) {
+    return const LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 1,
+    );
+  }
+
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.android:
+      return AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 1,
+        intervalDuration: const Duration(seconds: 1),
+        forceLocationManager: true,
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Live tracking active',
+          notificationText: 'Updating your location while tracking is on.',
+          enableWakeLock: true,
+        ),
+      );
+    case TargetPlatform.iOS:
+    case TargetPlatform.macOS:
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 1,
+        activityType: ActivityType.automotiveNavigation,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    case TargetPlatform.windows:
+    case TargetPlatform.linux:
+    case TargetPlatform.fuchsia:
+      return const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 1,
+      );
+  }
+}
+
 class CustomerInfoModal extends StatefulWidget {
   final Customer customer;
 
@@ -22,15 +62,24 @@ class CustomerInfoModal extends StatefulWidget {
   State<CustomerInfoModal> createState() => _CustomerInfoModalState();
 }
 
-class _CustomerInfoModalState extends State<CustomerInfoModal> {
+class _CustomerInfoModalState extends State<CustomerInfoModal> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final RoutingService _routingService = const RoutingService();
+  late final AnimationController _markerAnimationController;
   static const double _trackingZoom = 16.5;
   static const Duration _routeRefreshInterval = Duration(seconds: 6);
   static const double _routeRefreshDistanceMeters = 20;
+  static const Duration _streamStallThreshold = Duration(seconds: 8);
+  static const Duration _streamHealthCheckInterval = Duration(seconds: 4);
 
   StreamSubscription<Position>? _trackingSubscription;
+  Timer? _trackingHealthCheckTimer;
+  DateTime? _lastTrackingEventAt;
+  bool _isFallbackReadingPosition = false;
   Position? _trackedPosition;
+  LatLng? _animatedTrackedLatLng;
+  LatLng? _animationStartPoint;
+  LatLng? _animationEndPoint;
   bool _isTracking = false;
   bool _isTrackingBusy = false;
   String? _trackingError;
@@ -46,6 +95,60 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
   bool get _hasCustomerLocation => widget.customer.latitude != null && widget.customer.longitude != null;
 
   LatLng get _customerLatLng => LatLng(widget.customer.latitude!, widget.customer.longitude!);
+
+  void _cancelTrackingResources() {
+    _trackingSubscription?.cancel();
+    _trackingSubscription = null;
+    _trackingHealthCheckTimer?.cancel();
+    _trackingHealthCheckTimer = null;
+  }
+
+  Future<Position?> _readCurrentPositionFast() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _startTrackingHealthCheck() {
+    _trackingHealthCheckTimer?.cancel();
+    _trackingHealthCheckTimer = Timer.periodic(_streamHealthCheckInterval, (_) async {
+      if (!mounted || !_isTracking) return;
+      final lastEventAt = _lastTrackingEventAt;
+      if (lastEventAt == null) return;
+      if (DateTime.now().difference(lastEventAt) < _streamStallThreshold) return;
+      if (_isFallbackReadingPosition) return;
+
+      _isFallbackReadingPosition = true;
+      try {
+        final fallbackPosition = await _readCurrentPositionFast();
+        if (!mounted || !_isTracking || fallbackPosition == null) return;
+
+        _lastTrackingEventAt = DateTime.now();
+        setState(() {
+          _trackedPosition = fallbackPosition;
+        });
+        _animateToTrackedPosition(fallbackPosition);
+        unawaited(_fetchRoadRoute(origin: fallbackPosition));
+      } finally {
+        _isFallbackReadingPosition = false;
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _markerAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addListener(_onMarkerAnimationTick);
+  }
 
   String _appendEditedField(String field) {
     final current = (widget.customer.editedFields ?? '').trim();
@@ -169,9 +272,52 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
     }
   }
 
+  void _onMarkerAnimationTick() {
+    final from = _animationStartPoint;
+    final to = _animationEndPoint;
+    if (from == null || to == null || !mounted) return;
+
+    final t = Curves.easeOutCubic.transform(_markerAnimationController.value);
+    final lat = from.latitude + (to.latitude - from.latitude) * t;
+    final lng = from.longitude + (to.longitude - from.longitude) * t;
+    final next = LatLng(lat, lng);
+
+    setState(() {
+      _animatedTrackedLatLng = next;
+    });
+
+    if (_isTracking) {
+      _mapController.move(next, _trackingZoom);
+    }
+  }
+
+  void _animateToTrackedPosition(Position position) {
+    final target = LatLng(position.latitude, position.longitude);
+    final start = _animatedTrackedLatLng ?? target;
+    final moved = Geolocator.distanceBetween(
+      start.latitude,
+      start.longitude,
+      target.latitude,
+      target.longitude,
+    );
+
+    if (moved < 0.5) {
+      if (!mounted) return;
+      setState(() {
+        _animatedTrackedLatLng = target;
+      });
+      return;
+    }
+
+    _animationStartPoint = start;
+    _animationEndPoint = target;
+    _markerAnimationController.forward(from: 0);
+  }
+
   void _centerMapOnTrackedPosition() {
-    if (_trackedPosition == null) return;
-    final point = LatLng(_trackedPosition!.latitude, _trackedPosition!.longitude);
+    final point = _animatedTrackedLatLng ??
+        (_trackedPosition == null ? null : LatLng(_trackedPosition!.latitude, _trackedPosition!.longitude));
+    if (point == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _mapController.move(point, _trackingZoom);
@@ -222,13 +368,12 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
   }
 
   Future<void> _stopTracking({bool clearError = false}) async {
-    await _trackingSubscription?.cancel();
-    _trackingSubscription = null;
+    _cancelTrackingResources();
     if (!mounted) return;
     setState(() {
       _isTracking = false;
       _isRouteLoading = false;
-        _routeProvider = null;
+      _routeProvider = null;
       if (clearError) {
         _trackingError = null;
         _routeError = null;
@@ -261,23 +406,24 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
 
       setState(() {
         _trackedPosition = initialPosition;
+        _animatedTrackedLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
         _isTracking = true;
       });
+      _lastTrackingEventAt = DateTime.now();
       _centerMapOnTrackedPosition();
       await _fetchRoadRoute(origin: initialPosition, force: true);
+      _startTrackingHealthCheck();
 
       _trackingSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          distanceFilter: 5,
-        ),
+        locationSettings: buildTrackingLocationSettings(),
       ).listen(
         (position) {
           if (!mounted) return;
+          _lastTrackingEventAt = DateTime.now();
           setState(() {
             _trackedPosition = position;
           });
-          _centerMapOnTrackedPosition();
+          _animateToTrackedPosition(position);
           unawaited(_fetchRoadRoute(origin: position));
         },
         onError: (Object error) async {
@@ -331,21 +477,28 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
 
   @override
   void dispose() {
-    _trackingSubscription?.cancel();
+    _cancelTrackingResources();
+    _markerAnimationController.removeListener(_onMarkerAnimationTick);
+    _markerAnimationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final trackedLatLng = _trackedPosition == null
-        ? null
-        : LatLng(_trackedPosition!.latitude, _trackedPosition!.longitude);
+    final trackedLatLng = _animatedTrackedLatLng ??
+      (_trackedPosition == null ? null : LatLng(_trackedPosition!.latitude, _trackedPosition!.longitude));
     final distanceToCustomer = _routeDistanceMeters ?? _distanceToCustomerMeters;
     final bearingToCustomer = _bearingToCustomer;
 
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.8,
-      child: Column(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _cancelTrackingResources();
+        }
+      },
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.8,
+        child: Column(
         children: [
           Expanded(
             flex: 2,
@@ -378,6 +531,7 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
                             markers: [
                               Marker(
                                 point: _customerLatLng,
+                                rotate: true,
                                 child: const Icon(
                                   Icons.location_pin,
                                   color: Colors.red,
@@ -387,6 +541,7 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
                               if (trackedLatLng != null)
                                 Marker(
                                   point: trackedLatLng,
+                                  rotate: true,
                                   child: Container(
                                     decoration: BoxDecoration(
                                       color: Theme.of(context).colorScheme.primary,
@@ -569,6 +724,7 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -697,7 +853,7 @@ class _CustomerInfoModalState extends State<CustomerInfoModal> {
   }
 }
 
-class _FullScreenDirectionMap extends StatelessWidget {
+class _FullScreenDirectionMap extends StatefulWidget {
   const _FullScreenDirectionMap({
     required this.customerLatLng,
     required this.trackedLatLng,
@@ -722,6 +878,323 @@ class _FullScreenDirectionMap extends StatelessWidget {
   final double? durationSeconds;
   final double? bearingDegrees;
 
+  @override
+  State<_FullScreenDirectionMap> createState() => _FullScreenDirectionMapState();
+}
+
+class _FullScreenDirectionMapState extends State<_FullScreenDirectionMap> with SingleTickerProviderStateMixin {
+  static const double _trackingZoom = 16.5;
+  static const Duration _routeRefreshInterval = Duration(seconds: 6);
+  static const double _routeRefreshDistanceMeters = 20;
+  static const double _navigationAnchorYOffset = 180;
+  static const Duration _streamStallThreshold = Duration(seconds: 8);
+  static const Duration _streamHealthCheckInterval = Duration(seconds: 4);
+
+  final MapController _mapController = MapController();
+  final RoutingService _routingService = const RoutingService();
+  late final AnimationController _markerAnimationController;
+
+  StreamSubscription<Position>? _trackingSubscription;
+  Timer? _trackingHealthCheckTimer;
+  DateTime? _lastTrackingEventAt;
+  bool _isFallbackReadingPosition = false;
+  LatLng? _animatedTrackedLatLng;
+  LatLng? _animationStartPoint;
+  LatLng? _animationEndPoint;
+  LatLng? _lastRouteOrigin;
+  DateTime? _lastRouteFetchAt;
+  String? _trackingError;
+  double? _liveDistanceMeters;
+  double? _liveBearingDegrees;
+  double? _liveDurationSeconds;
+  bool _isLiveRouteLoading = false;
+  String? _liveRouteError;
+  String? _liveRouteProvider;
+  List<LatLng> _liveRoutePoints = [];
+  List<String> _liveRoadSuggestions = [];
+  bool _isCameraFollowEnabled = true;
+  bool _isNavigationViewEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _animatedTrackedLatLng = widget.trackedLatLng;
+    _liveDistanceMeters = widget.distanceMeters;
+    _liveBearingDegrees = widget.bearingDegrees;
+    _liveDurationSeconds = widget.durationSeconds;
+    _liveRoutePoints = List<LatLng>.from(widget.routePoints);
+    _liveRouteProvider = widget.routeProvider;
+    _isCameraFollowEnabled = widget.isTracking;
+    _isNavigationViewEnabled = false;
+
+    _markerAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addListener(_onMarkerAnimationTick);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final trackedLatLng = _animatedTrackedLatLng;
+      if (trackedLatLng != null && _isCameraFollowEnabled) {
+        _updateFollowCamera(trackedLatLng);
+      } else {
+        _mapController.move(trackedLatLng ?? widget.customerLatLng, trackedLatLng == null ? 15.0 : 16.5);
+      }
+    });
+
+    if (widget.isTracking) {
+      _startLiveTracking();
+    }
+  }
+
+  Future<void> _startLiveTracking() async {
+    await _trackingSubscription?.cancel();
+    _lastTrackingEventAt = DateTime.now();
+    _startTrackingHealthCheck();
+    _trackingSubscription = Geolocator.getPositionStream(
+      locationSettings: buildTrackingLocationSettings(),
+    ).listen(
+      (position) {
+        _lastTrackingEventAt = DateTime.now();
+        _trackingError = null;
+        _animateTo(LatLng(position.latitude, position.longitude));
+        unawaited(_fetchLiveRoute(position));
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _trackingError = error.toString();
+        });
+      },
+    );
+  }
+
+  Future<Position?> _readCurrentPositionFast() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _startTrackingHealthCheck() {
+    _trackingHealthCheckTimer?.cancel();
+    _trackingHealthCheckTimer = Timer.periodic(_streamHealthCheckInterval, (_) async {
+      if (!mounted || !widget.isTracking) return;
+      final lastEventAt = _lastTrackingEventAt;
+      if (lastEventAt == null) return;
+      if (DateTime.now().difference(lastEventAt) < _streamStallThreshold) return;
+      if (_isFallbackReadingPosition) return;
+
+      _isFallbackReadingPosition = true;
+      try {
+        final fallbackPosition = await _readCurrentPositionFast();
+        if (!mounted || !widget.isTracking || fallbackPosition == null) return;
+
+        _lastTrackingEventAt = DateTime.now();
+        _trackingError = null;
+        _animateTo(LatLng(fallbackPosition.latitude, fallbackPosition.longitude));
+        unawaited(_fetchLiveRoute(fallbackPosition));
+      } finally {
+        _isFallbackReadingPosition = false;
+      }
+    });
+  }
+
+  bool _shouldRefreshRoute(Position origin) {
+    if (_lastRouteOrigin == null || _lastRouteFetchAt == null) return true;
+
+    final elapsed = DateTime.now().difference(_lastRouteFetchAt!);
+    if (elapsed < _routeRefreshInterval) return false;
+
+    final moved = Geolocator.distanceBetween(
+      _lastRouteOrigin!.latitude,
+      _lastRouteOrigin!.longitude,
+      origin.latitude,
+      origin.longitude,
+    );
+    return moved >= _routeRefreshDistanceMeters;
+  }
+
+  Future<void> _fetchLiveRoute(Position origin, {bool force = false}) async {
+    if (_isLiveRouteLoading) return;
+    if (!force && !_shouldRefreshRoute(origin)) return;
+
+    if (mounted) {
+      setState(() {
+        _isLiveRouteLoading = true;
+        _liveRouteError = null;
+      });
+    }
+
+    try {
+      final route = await _routingService.getDrivingRoute(
+        origin: LatLng(origin.latitude, origin.longitude),
+        destination: widget.customerLatLng,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _liveRoutePoints = route.points;
+        _liveDistanceMeters = route.distanceMeters ?? _liveDistanceMeters;
+        _liveDurationSeconds = route.durationSeconds ?? _liveDurationSeconds;
+        _liveRouteProvider = route.provider;
+        _liveRoadSuggestions = route.suggestions;
+        _liveRouteError = null;
+      });
+      if (_isCameraFollowEnabled && _isNavigationViewEnabled && _animatedTrackedLatLng != null) {
+        _updateFollowCamera(_animatedTrackedLatLng!);
+      }
+      _lastRouteOrigin = LatLng(origin.latitude, origin.longitude);
+      _lastRouteFetchAt = DateTime.now();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _liveRouteError = e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiveRouteLoading = false;
+        });
+      }
+    }
+  }
+
+  void _focusOnUser() {
+    final trackedLatLng = _animatedTrackedLatLng;
+    if (trackedLatLng == null) return;
+    _updateFollowCamera(trackedLatLng);
+  }
+
+  void _fitUserAndCustomer() {
+    final trackedLatLng = _animatedTrackedLatLng;
+    if (trackedLatLng == null) {
+      _mapController.move(widget.customerLatLng, 15.0);
+      return;
+    }
+
+    final bounds = LatLngBounds.fromPoints([trackedLatLng, widget.customerLatLng]);
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.all(56),
+      ),
+    );
+  }
+
+  Offset _navigationAnchorOffset() => const Offset(0, _navigationAnchorYOffset);
+
+  List<LatLng> _buildDisplayedRoutePoints(LatLng trackedLatLng) {
+    final routePoints = _liveRoutePoints;
+    if (routePoints.length >= 2) {
+      return List<LatLng>.from(routePoints)..[0] = trackedLatLng;
+    }
+    return [trackedLatLng, widget.customerLatLng];
+  }
+
+  LatLng _navigationLookAheadTarget(LatLng trackedLatLng) {
+    final displayedPoints = _buildDisplayedRoutePoints(trackedLatLng);
+    for (final point in displayedPoints.skip(1)) {
+      final distance = Geolocator.distanceBetween(
+        trackedLatLng.latitude,
+        trackedLatLng.longitude,
+        point.latitude,
+        point.longitude,
+      );
+      if (distance >= 20) {
+        return point;
+      }
+    }
+    return widget.customerLatLng;
+  }
+
+  double _navigationRotation(LatLng trackedLatLng) {
+    final target = _navigationLookAheadTarget(trackedLatLng);
+    final bearing = Geolocator.bearingBetween(
+      trackedLatLng.latitude,
+      trackedLatLng.longitude,
+      target.latitude,
+      target.longitude,
+    );
+    return (360 - bearing) % 360;
+  }
+
+  void _updateFollowCamera(LatLng trackedLatLng) {
+    if (!_isCameraFollowEnabled) return;
+
+    if (_isNavigationViewEnabled) {
+      final offset = _navigationAnchorOffset();
+      final rotation = _navigationRotation(trackedLatLng);
+      _mapController.move(trackedLatLng, _trackingZoom, offset: offset);
+      _mapController.rotateAroundPoint(rotation, offset: offset);
+      return;
+    }
+
+    _mapController.moveAndRotate(trackedLatLng, _trackingZoom, 0);
+  }
+
+  void _animateTo(LatLng target) {
+    final start = _animatedTrackedLatLng ?? target;
+    final moved = Geolocator.distanceBetween(
+      start.latitude,
+      start.longitude,
+      target.latitude,
+      target.longitude,
+    );
+
+    _liveDistanceMeters = Geolocator.distanceBetween(
+      target.latitude,
+      target.longitude,
+      widget.customerLatLng.latitude,
+      widget.customerLatLng.longitude,
+    );
+    _liveBearingDegrees = Geolocator.bearingBetween(
+      target.latitude,
+      target.longitude,
+      widget.customerLatLng.latitude,
+      widget.customerLatLng.longitude,
+    );
+
+    if (moved < 0.5) {
+      if (!mounted) return;
+      setState(() {
+        _animatedTrackedLatLng = target;
+      });
+      if (_isCameraFollowEnabled) {
+        _updateFollowCamera(target);
+      }
+      return;
+    }
+
+    _animationStartPoint = start;
+    _animationEndPoint = target;
+    _markerAnimationController.forward(from: 0);
+  }
+
+  void _onMarkerAnimationTick() {
+    final from = _animationStartPoint;
+    final to = _animationEndPoint;
+    if (from == null || to == null || !mounted) return;
+
+    final t = Curves.easeOutCubic.transform(_markerAnimationController.value);
+    final next = LatLng(
+      from.latitude + (to.latitude - from.latitude) * t,
+      from.longitude + (to.longitude - from.longitude) * t,
+    );
+
+    setState(() {
+      _animatedTrackedLatLng = next;
+    });
+    if (_isCameraFollowEnabled) {
+      _updateFollowCamera(next);
+    }
+  }
+
   String _formatDistance(double meters) {
     if (meters >= 1000) {
       return '${(meters / 1000).toStringAsFixed(2)} km';
@@ -738,9 +1211,19 @@ class _FullScreenDirectionMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final trackedLatLng = _animatedTrackedLatLng;
+    final customerLatLng = widget.customerLatLng;
     final linePoints = trackedLatLng == null
         ? <LatLng>[]
-        : (routePoints.length >= 2 ? routePoints : [customerLatLng, trackedLatLng!]);
+        : _buildDisplayedRoutePoints(trackedLatLng);
+    final distanceMeters = _liveDistanceMeters;
+    final bearingDegrees = _liveBearingDegrees;
+    final durationSeconds = _liveDurationSeconds ?? widget.durationSeconds;
+    final routeProvider = _liveRouteProvider ?? widget.routeProvider;
+    final routeError = _liveRouteError ?? widget.routeError;
+    final interactionFlags = widget.isTracking && _isCameraFollowEnabled
+        ? InteractiveFlag.none
+        : InteractiveFlag.all;
 
     return Scaffold(
       appBar: AppBar(
@@ -749,9 +1232,11 @@ class _FullScreenDirectionMap extends StatelessWidget {
       body: Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
               initialCenter: trackedLatLng ?? customerLatLng,
               initialZoom: trackedLatLng == null ? 15.0 : 16.5,
+              interactionOptions: InteractionOptions(flags: interactionFlags),
             ),
             children: [
               TileLayer(
@@ -773,6 +1258,7 @@ class _FullScreenDirectionMap extends StatelessWidget {
                 markers: [
                   Marker(
                     point: customerLatLng,
+                    rotate: true,
                     child: const Icon(
                       Icons.location_pin,
                       color: Colors.red,
@@ -781,7 +1267,8 @@ class _FullScreenDirectionMap extends StatelessWidget {
                   ),
                   if (trackedLatLng != null)
                     Marker(
-                      point: trackedLatLng!,
+                      point: trackedLatLng,
+                      rotate: true,
                       child: Container(
                         decoration: BoxDecoration(
                           color: Theme.of(context).colorScheme.primary,
@@ -809,21 +1296,169 @@ class _FullScreenDirectionMap extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(isTracking ? 'Tracking: ON' : 'Tracking: OFF'),
-                    if (isRouteLoading) const Text('Route: updating...'),
-                    if (distanceMeters != null) Text('Distance: ${_formatDistance(distanceMeters!)}'),
-                    if (durationSeconds != null) Text('ETA: ${(durationSeconds! / 60).toStringAsFixed(0)} min'),
+                    Text(widget.isTracking ? 'Tracking: ON' : 'Tracking: OFF'),
+                    if (_isLiveRouteLoading || widget.isRouteLoading) const Text('Route: updating...'),
+                    if (distanceMeters != null) Text('Distance: ${_formatDistance(distanceMeters)}'),
+                    if (durationSeconds != null) Text('ETA: ${(durationSeconds / 60).toStringAsFixed(0)} min'),
                     if (routeProvider != null) Text('Route source: $routeProvider'),
                     if (bearingDegrees != null)
-                      Text('Direction: ${bearingDegrees!.toStringAsFixed(0)}° ${_bearingLabel(bearingDegrees!)}'),
+                      Text('Direction: ${bearingDegrees.toStringAsFixed(0)}° ${_bearingLabel(bearingDegrees)}'),
                     if (routeError != null) const Text('Route: unavailable, using straight line'),
+                    if (_trackingError != null) Text('Error: $_trackingError'),
                   ],
                 ),
               ),
             ),
           ),
+          if (_liveRoadSuggestions.isNotEmpty)
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 16,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final suggestion in _liveRoadSuggestions)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Chip(
+                          avatar: const Icon(Icons.alt_route, size: 16),
+                          label: Text(
+                            suggestion,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          if (widget.isTracking)
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Material(
+                color: Colors.black.withAlpha(150),
+                borderRadius: BorderRadius.circular(999),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () {
+                    setState(() {
+                      _isCameraFollowEnabled = !_isCameraFollowEnabled;
+                      if (!_isCameraFollowEnabled) {
+                        _isNavigationViewEnabled = false;
+                      }
+                    });
+
+                    if (_isCameraFollowEnabled && _animatedTrackedLatLng != null) {
+                      _updateFollowCamera(_animatedTrackedLatLng!);
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _isCameraFollowEnabled ? Icons.gps_fixed : Icons.gps_not_fixed,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _isCameraFollowEnabled ? 'Follow ON' : 'Follow OFF',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (widget.isTracking)
+            Positioned(
+              top: 58,
+              right: 10,
+              child: Material(
+                color: _isCameraFollowEnabled
+                    ? Colors.black.withAlpha(150)
+                    : Colors.black.withAlpha(100),
+                borderRadius: BorderRadius.circular(999),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: !_isCameraFollowEnabled
+                      ? null
+                      : () {
+                          setState(() {
+                            _isNavigationViewEnabled = !_isNavigationViewEnabled;
+                          });
+
+                          final trackedLatLng = _animatedTrackedLatLng;
+                          if (trackedLatLng != null) {
+                            _updateFollowCamera(trackedLatLng);
+                          }
+                        },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _isNavigationViewEnabled ? Icons.navigation : Icons.explore,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _isNavigationViewEnabled ? 'Nav View' : 'Center View',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            right: 10,
+            bottom: _liveRoadSuggestions.isNotEmpty ? 74 : 16,
+            child: Column(
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'fs_fit_all',
+                  onPressed: _fitUserAndCustomer,
+                  tooltip: 'Fit User + Customer',
+                  child: const Icon(Icons.fit_screen),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'fs_focus_user',
+                  onPressed: () {
+                    if (widget.isTracking) {
+                      setState(() {
+                        _isCameraFollowEnabled = true;
+                      });
+                    }
+                    _focusOnUser();
+                  },
+                  tooltip: 'Focus User',
+                  child: const Icon(Icons.my_location),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _trackingSubscription?.cancel();
+    _trackingHealthCheckTimer?.cancel();
+    _markerAnimationController.removeListener(_onMarkerAnimationTick);
+    _markerAnimationController.dispose();
+    super.dispose();
   }
 }

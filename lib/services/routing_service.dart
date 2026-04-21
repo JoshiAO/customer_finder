@@ -8,12 +8,14 @@ class RouteResult {
   final double? distanceMeters;
   final double? durationSeconds;
   final String provider;
+  final List<String> suggestions;
 
   const RouteResult({
     required this.points,
     required this.provider,
     this.distanceMeters,
     this.durationSeconds,
+    this.suggestions = const [],
   });
 }
 
@@ -38,7 +40,7 @@ class RoutingService {
           '$provider/route/v1/driving/'
           '${origin.longitude},${origin.latitude};'
           '${destination.longitude},${destination.latitude}'
-          '?overview=full&geometries=geojson&steps=false&alternatives=false',
+          '?overview=full&geometries=geojson&steps=true&alternatives=false',
         );
 
         final response = await http.get(uri).timeout(timeout);
@@ -73,11 +75,30 @@ class RoutingService {
           throw Exception('Route geometry is empty');
         }
 
+        final suggestions = <String>[];
+        final seen = <String>{};
+        final legs = (route['legs'] as List<dynamic>? ?? const []);
+        for (final leg in legs) {
+          if (leg is! Map<String, dynamic>) continue;
+          final steps = (leg['steps'] as List<dynamic>? ?? const []);
+          for (final step in steps) {
+            if (step is! Map<String, dynamic>) continue;
+            final name = (step['name'] as String? ?? '').trim();
+            if (name.isEmpty) continue;
+            if (seen.add(name)) {
+              suggestions.add('Take $name');
+            }
+            if (suggestions.length >= 3) break;
+          }
+          if (suggestions.length >= 3) break;
+        }
+
         return RouteResult(
           points: points,
           distanceMeters: (route['distance'] as num?)?.toDouble(),
           durationSeconds: (route['duration'] as num?)?.toDouble(),
           provider: provider,
+          suggestions: suggestions,
         );
       } catch (e) {
         lastError = e;
