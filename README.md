@@ -1,117 +1,181 @@
 # Customer Finder
 
-Customer Finder is a field operations and customer master management app. It is designed to help teams load a customer master list, review accounts by DSP or location, update customer information, capture verified GPS coordinates with supporting photos, and export edited records for submission or consolidation.
+Customer Finder is an offline-first field operations and customer master management app. It helps teams import a customer master list, review accounts by DSP or geography, update customer details, capture verified GPS coordinates with photo evidence, and export edited records for turnover.
 
-The app follows an offline-first workflow built around a local database. Customer records are imported from CML files, managed inside the app, tagged when edited, and then exported together with captured images as a ZIP archive for downstream processing.
+The app stores operational data locally, so the main workflow remains usable in the field without requiring continuous connectivity. Imported customer data, DSP reference data, area hierarchy overrides, edited flags, and captured images are all handled inside the app's local workflow.
 
-## App Workflow Summary
+## Core Capabilities
 
-When the app starts, it shows a branded launch screen and then opens the main workspace with three primary sections:
+- import customer master data from CSV or XLSX CML files
+- update an existing local customer dataset by adding only new customer records
+- browse customers by DSP, province, city, and barangay
+- filter and search customers by operational and geographic criteria
+- update customer status and core customer information
+- capture exactly three supporting photos before submitting a new GPS location
+- preview stored coordinates on a map and use live road-route tracking to a customer
+- export edited records and captured images as a ZIP archive
+- personalize the app theme, home background, launch logo, and launch title
 
-- **Home**: operational dashboard for importing, updating, and exporting customer data
-- **DSP**: customer browsing by sales representative or team
-- **City/Brgy**: customer browsing by province, city, and barangay
+## App Structure
 
-The normal field workflow is:
+When the app opens, it shows a branded launch screen and then loads the main workspace with three sections:
 
-1. Import the latest CML file into the local database.
-2. Review customer counts and edited-record totals from the Home dashboard.
-3. Browse customers either by DSP assignment or by geographic area.
-4. Open an individual customer record to inspect its details and map location.
-5. Update status, customer information, or capture a fresh GPS location with photo evidence.
-6. Export all edited records and related images as a ZIP file for turnover.
+- **Home**: import, update, clear, monitor, export, and personalization tools
+- **DSP**: browsing by sales representative and team
+- **City/Brgy**: browsing by province, city, barangay, and customer status
+
+## Typical Workflow
+
+1. Import the latest CML into the local database.
+2. Review overall and edited record counts from the Home dashboard.
+3. Browse customers by DSP assignment or by geographic area.
+4. Open a customer record to review details, coordinates, and map state.
+5. Update customer status or customer information as needed.
+6. Capture a fresh location with the required three-photo checklist when field verification is needed.
+7. Export edited records and captured images as a ZIP archive for submission.
 
 ## Main Procedures
 
-### 1. Importing Customer Data
+### 1. Importing and Updating Customer Data
 
-The Home page supports two customer master procedures:
+The Home page supports two customer master operations:
 
-- **Import CML** replaces the existing local customer dataset with a new CSV or XLSX file.
-- **Update CML** compares the new file against the local database and adds only customer records that do not yet exist.
+- **Import CML** loads a CSV or XLSX file into local storage and replaces the active customer dataset.
+- **Update CML** compares a new file against the local database and adds only customer records that do not yet exist locally.
 
-Both actions show progress indicators during processing. After an import or update, the Home dashboard automatically refreshes the customer counts.
+Both actions run with progress tracking. After completion, the Home dashboard refreshes customer counts automatically.
 
-### 2. Monitoring Operational Counts
+### 2. Monitoring Local Operational Counts
 
-The Home page acts as a quick status board for the local dataset. It summarizes record totals and keeps track of how many customer records have been edited and are ready for export. This gives users a simple checkpoint before and after fieldwork.
+The Home page acts as a status dashboard for the local dataset. It shows:
 
-### 3. Browsing by DSP
+- total customer counts
+- edited record counts
+- import, update, clear, and export progress indicators
 
-The DSP page organizes customers by sales representative and team. Users can:
+This gives users a quick checkpoint before and after field activity.
 
-- filter DSPs by team
-- update the DSP master list using a CSV file
+### 3. Managing Local Reference Data
+
+The app supports reference-data refreshes directly inside the workflow:
+
+- the **DSP** page can import a new DSP master list from CSV
+- the **City/Brgy** page can import a new `Area.csv` file to overwrite the active province-city-barangay hierarchy used by its dropdown filters
+
+These updates are persisted locally and reused by the app after restart.
+
+### 4. Browsing by DSP
+
+The DSP page groups customers by sales representative and team. Users can:
+
+- filter DSP cards by team
+- update the DSP master list from CSV
 - open a DSP to view assigned customers
-- filter the customer list by status, coverage day, weekly coverage, and presence of GPS coordinates
+- filter customers by status, coverage day, weekly coverage, and whether valid longitude and latitude are present
 
-This view is useful for workload review, route preparation, and DSP-level account validation.
+This view is useful for workload review, route planning, and DSP-level validation.
 
-### 4. Browsing by City and Barangay
+### 5. Browsing by Province, City, and Barangay
 
-The City/Brgy page provides geographic filtering using the area master data. Users can:
+The City/Brgy page supports geographic filtering driven by the active area hierarchy. Users can:
 
 - filter by province, city, barangay, and customer status
 - search by customer code, customer name, or contact/person name
-- limit results to only records with valid longitude and latitude
+- limit results to customers with valid longitude and latitude
+- refresh the hierarchy by importing a replacement area CSV file
 
-This view is intended for territorial review and for locating accounts within specific service areas.
+This view is intended for territorial review and service-area validation.
 
-### 5. Reviewing and Updating a Customer Record
+### 6. Reviewing a Customer Record
 
-Selecting a customer opens a detail modal that displays:
+Selecting a customer opens a detail modal with:
 
-- current customer information
-- map preview when coordinates are already stored
+- current customer details
 - latitude and longitude values
-- available customer actions
+- map preview when coordinates are available
+- live tracking and route guidance controls when location access is granted
+- customer update actions
 
-From this record view, users can perform three core updates:
+From this view, users can perform these core actions:
 
 - **Customer Status Update**: switch the account between active/approved and blocked/on hold
-- **Customer Information Update**: edit key fields such as coverage schedule, contact data, owner/person name, TIN, address, province, city, and barangay
-- **Capture New Location**: record a new GPS point tied to the customer
+- **Customer Information Update**: edit fields such as coverage schedule, phone, owner/contact name, TIN, address, province, city, and barangay
+- **Capture New Location**: record a new GPS point tied to the customer after photo confirmation
 
-Each update marks the record as edited so it can be included in the next export package.
+Each successful update marks the record as edited so it can be included in the next export package.
 
-### 6. Capturing Location and Photo Evidence
+### 7. Live Map Tracking and Road Routing
 
-Location capture follows a guided procedure:
+When a customer has stored coordinates, the detail view can use the device's current position to support live tracking. The map workflow includes:
+
+- high-accuracy location tracking
+- animated movement of the user marker
+- road-route fetching through OSRM-compatible routing providers
+- route distance and duration feedback
+- adaptive rerouting and off-route detection
+- full-screen route view for navigation focus
+- recovery prompts when GPS or location permission is disabled
+
+This is intended to help users follow a road route toward a customer instead of relying only on a static point on the map.
+
+### 8. Capturing Location and Photo Evidence
+
+Location capture follows a guided process:
 
 1. The user captures exactly three photos using the device camera.
 2. The app opens a preview screen where each image can be reviewed or retaken.
-3. After photo confirmation, the app requests the device's current GPS position.
-4. The user confirms the latitude and longitude before submission.
-5. The images are stored in a customer-specific folder and the customer record is updated with the new coordinates.
+3. After image confirmation, the app reads the device's GPS position.
+4. The user confirms the location submission.
+5. The images are stored in a customer-specific local folder and the customer record is updated with the new coordinates.
 
-This process ensures that every location update is supported by a consistent three-image photo set.
+This keeps every location update tied to a consistent three-image evidence set.
 
-### 7. Exporting Edited Records
+### 9. Exporting Edited Records
 
 The Home page can export all edited customer records into a ZIP archive. The export package contains:
 
 - an Excel file of edited customers
 - the captured image folders associated with those edited customers
 
-After a successful export, the app clears the edited flags for the exported records so that the next export contains only newly changed data.
+The ZIP is typically saved to the device Downloads folder when available. After a successful export, the app clears the edited flags of exported records so the next export contains only newly changed records.
+
+### 10. Clearing Local Data
+
+The Home page also includes a local clear-data procedure. This removes customer and DSP records from local storage after confirmation, which is useful before loading a fresh operational dataset.
+
+## Personalization
+
+The Home page includes a theme and personalization panel. Users can:
+
+- choose from predefined theme presets
+- change light or dark mode where allowed by the selected theme
+- set a custom home background image
+- set a custom launch logo image
+- change the launch screen title text
+
+These settings are persisted locally on device storage.
 
 ## Data Handling Notes
 
-- Customer data is stored locally in the app database for fast access and offline use.
-- CML imports support both CSV and XLSX formats.
-- DSP reference data can be refreshed through a CSV upload.
-- Area filtering is based on the bundled area master file.
-- Export output is saved as a ZIP archive, typically to the device Downloads folder when available.
+- customer data is stored locally for offline-first use
+- CML imports support both CSV and XLSX files
+- the app keeps a persisted snapshot of the last imported CML for repair and reuse scenarios
+- DSP reference data can be refreshed from CSV
+- province, city, and barangay filtering can use a locally overridden area hierarchy imported from CSV
+- edited customer export is generated as a ZIP archive that bundles spreadsheet data and captured images
+- captured images are stored locally in customer-specific folders
 
 ## Recommended Field Procedure
 
 For day-to-day operations, the recommended procedure is:
 
-1. Load the latest CML before starting field activity.
-2. Review records by DSP or by location, depending on assignment.
-3. Open customer records and validate account details on site.
-4. Update status or customer information when discrepancies are found.
-5. Capture a new location only after completing the required three-photo checklist.
-6. Export the edited archive at the end of the cycle and submit it to the receiving team.
+1. Import or update the latest CML before starting fieldwork.
+2. Review counts on the Home page to confirm the local dataset is ready.
+3. Browse records by DSP or by location, depending on assignment.
+4. Open customer records and validate account details on site.
+5. Use the map view and live tracking tools when navigating to a customer.
+6. Update status or customer information when discrepancies are confirmed.
+7. Capture a new location only after completing the required three-photo checklist.
+8. Export the edited ZIP archive at the end of the cycle and submit it to the receiving team.
 
-This procedure keeps local records current, makes field validation traceable, and ensures that exported updates are complete and organized.
+This workflow keeps local records current, makes field validation traceable, and ensures that exported updates remain organized and evidence-backed.
